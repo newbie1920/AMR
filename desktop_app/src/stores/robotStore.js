@@ -104,6 +104,10 @@ const useRobotStore = create((set, get) => {
                         vL_t: msg.vL_t, vL_r: msg.vL_r,
                         vR_t: msg.vR_t, vR_r: msg.vR_r,
                         pwmL: msg.pwmL, pwmR: msg.pwmR,
+                        ticks: msg.enc ? {
+                            left: Math.round(msg.enc.l / 1000) * 1000,
+                            right: Math.round(msg.enc.r / 1000) * 1000
+                        } : { left: 0, right: 0 }
                     },
                     traveledPath: newPath.slice(-500)
                 };

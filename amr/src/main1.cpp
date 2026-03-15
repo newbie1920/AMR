@@ -4,6 +4,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFiManager.h>
+#include <ArduinoOTA.h>
 
 // =======================================================================================
 //   AMR FIRMWARE - SERVO MG996R VERSION
@@ -92,6 +93,18 @@ void setup() {
     MDNS.addService("ws", "tcp", 81);
   }
 
+  // 2.1 OTA Setup
+  ArduinoOTA.setHostname("amr-robot");
+  ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
+  ArduinoOTA.onEnd([]() { Serial.println("\nOTA End"); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+  });
+  ArduinoOTA.begin();
+
   // 3. Thiết lập WebSocket lắng nghe lệnh từ ứng dụng
   webSocket.begin();
   webSocket.onEvent([](uint8_t num, WStype_t type, uint8_t *payload,
@@ -162,6 +175,7 @@ void setup() {
 //   MAIN LOOP
 // ============================================================
 void loop() {
+  ArduinoOTA.handle();
   webSocket.loop();
   server.handleClient();
 

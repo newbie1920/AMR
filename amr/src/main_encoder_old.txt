@@ -120,6 +120,23 @@ WebServer server(80);
 WebSocketsServer webSocket(81);
 
 // ============================================================
+//   WIRELESS LOGGING HELPER
+// ============================================================
+void webLog(String text, String level = "info") {
+  Serial.println("[" + level + "] " + text);
+  
+  JsonDocument doc;
+  doc["type"] = "log";
+  doc["text"] = text;
+  doc["level"] = level;
+  doc["ts"] = millis();
+  
+  String output;
+  serializeJson(doc, output);
+  webSocket.broadcastTXT(output);
+}
+
+// ============================================================
 //   INTERRUPT SERVICE ROUTINES (ISRs)
 // ============================================================
 // Standard Quadrature Decoding
@@ -482,8 +499,6 @@ void loop() {
       errRight = 0;
     } else {
       pwmRight = (targetR * ffGain) + (Kp * errRight) + (Ki * intRight);
-      // Clamp to max 255 BEFORE compensation to allow Virtual Axle to reduce power
-      pwmRight = constrain(pwmRight, -255.0f, 255.0f);
     }
 
     float pwmLeft = 0;
@@ -501,7 +516,6 @@ void loop() {
         errLeft = 0;
       } else {
         pwmLeft = (targetL * ffGainLeft) + (Kp * errLeft) + (Ki * intLeft);
-        pwmLeft = constrain(pwmLeft, -255.0f, 255.0f);
       }
     }
     // --- CHẾ ĐỘ ĐI ĐƯỜNG THẲNG (MASTER-SLAVE) ---
@@ -575,13 +589,9 @@ void loop() {
       doc["x"] = -robotX; // NEGATE for App
       doc["y"] = -robotY; // NEGATE for App
 
-      // Round to nearest 1000 for display/telemetry
-      long rounded_cL = round((float)cL / 1000.0f) * 1000;
-      long rounded_cR = round((float)cR / 1000.0f) * 1000;
-
       JsonObject enc = doc["enc"].to<JsonObject>();
-      enc["l"] = -rounded_cL; // NEGATE for App
-      enc["r"] = -rounded_cR; // NEGATE for App
+      enc["l"] = -cL; // NEGATE for App
+      enc["r"] = -cR; // NEGATE for App
 
       // === PID Tuning Data ===
       // Negate these so the app plots positive velocities for forward
@@ -603,8 +613,8 @@ void loop() {
       webSocket.broadcastTXT(output);
 
       // DEBUG: Print to Serial Monitor
-      Serial.printf("L_Ticks: %ld | R_Ticks: %ld | vL: %.2f | vR: %.2f%s\n", rounded_cL,
-                    rounded_cR, vL_meas, vR_meas, wasStraight ? " [VA: ACTIVE]" : "");
+      Serial.printf("L_Ticks: %ld | R_Ticks: %ld | vL: %.2f | vR: %.2f%s\n", cL,
+                    cR, vL_meas, vR_meas, wasStraight ? " [VA: ACTIVE]" : "");
     }
   }
 }
