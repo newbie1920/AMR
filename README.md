@@ -130,38 +130,37 @@ npm run electron:dev
 - **Scroll** - Zoom in/out
 - **Middle-click + drag** - Pan map
 
-## 🔌 Sơ Đồ Nối Dây ESP32
+## 🔌 Sơ Đồ Nối Dây Linh Kiện (Hardware Wiring)
 
-ESP32          L298N          Motor
-----------------------------------
-GPIO19 (EN)    ENA            Left Motor
-GPIO18         IN1            Left Motor
-GPIO5          IN2            Left Motor
-GPIO4 (EN)     ENB            Right Motor
-GPIO17         IN3            Right Motor
-GPIO16         IN4            Right Motor
-GND            GND            -
--              OUT1/2         Left Motor
--              OUT3/4         Right Motor
+Hệ thống sử dụng **ESP32** kết hợp với Driver động cơ **L298N** (hoặc tương đương) và động cơ DC có **Encoder**. Dưới đây là cấu hình chân thực tế đã được lập trình trong Firmware.
 
-ESP32          Encoder (Left)
-----------------------------------
-GPIO35         Channel A
-GPIO34         Channel B
-GND            GND
+### 1. Kết nối Động cơ (Motor Driver - L298N)
+| Linh kiện | Chân ESP32 | Chân L298N | Chức năng |
+| :--- | :--- | :--- | :--- |
+| **Motor Trái** | GPIO 19 | ENA | PWM (Tốc độ) |
+| | GPIO 5 | IN1 | Hướng quay |
+| | GPIO 18 | IN2 | Hướng quay |
+| **Motor Phải** | GPIO 27 | ENB | PWM (Tốc độ) |
+| | GPIO 26 | IN3 | Hướng quay |
+| | GPIO 25 | IN4 | Hướng quay |
 
-ESP32          Encoder (Right)
-----------------------------------
-GPIO23         Channel A
-GPIO22         Channel B
-GND            GND
+### 2. Kết nối Encoder
+| Linh kiện | Chân ESP32 | Chân Encoder | Màu dây (Gợi ý) |
+| :--- | :--- | :--- | :--- |
+| **Encoder Trái** | GPIO 32 | Phase A | Trắng / Vàng |
+| | GPIO 33 | Phase B | Xanh dương |
+| **Encoder Phải** | GPIO 17 | Phase A | Trắng / Vàng |
+| | GPIO 16 | Phase B | Xanh dương |
+| **Nguồn** | 3.3V / 5V | VCC | Đỏ |
+| | GND | GND | Đen |
 
-ESP32          Touch Controls
-----------------------------------
-GPIO14         Up
-GPIO27         Down
-GPIO32         Left
-GPIO33         Right
+### 3. Sơ đồ Nguồn (Power Supply)
+*   **Pin 12V:** Cấp vào chân `VCC 12V` của L298N.
+*   **GND:** Nối chung tất cả GND (Pin, ESP32, L298N, Encoder).
+*   **5V Out (L298N):** Có thể dùng để cấp nguồn cho ESP32 nếu dùng nguồn Pin 12V.
+
+> [!IMPORTANT]
+> **Lưu ý về hướng quay:** Nếu robot đi tiến mà một bánh quay ngược, hãy đảo 2 dây nối từ L298N ra động cơ đó (OUT1-OUT2 hoặc OUT3-OUT4), KHÔNG cần sửa code.
 
 
 ## ⚙️ Cấu Hình
