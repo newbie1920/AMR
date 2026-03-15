@@ -1,0 +1,170 @@
+.fleet-app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--color-bg-primary);
+}
+
+.main-panel-group {
+    flex: 1;
+    min-height: 0;
+    display: flex !important;
+}
+
+/* Sidebars */
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    overflow: hidden;
+    height: 100%;
+    /* Ensure full height */
+}
+
+.left-sidebar {
+    height: 100%;
+}
+
+.right-sidebar {
+    height: 100%;
+}
+
+.sidebar-section {
+    flex-shrink: 0;
+    /* Allow resizing but respect content */
+    max-height: 50%;
+    /* Prevent any single section from taking over */
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-section.flex-1 {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.sidebar-section.flex-1>* {
+    height: 100%;
+}
+
+/* Main Content */
+.main-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+
+.content-top {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+}
+
+/* Status Bar Container */
+.status-bar-container {
+    position: relative;
+    z-index: 100;
+    flex-shrink: 0;
+}
+
+/* Resize Handle */
+.resize-handle {
+    width: 10px;
+    margin: 0 2px;
+    background: rgba(255, 255, 255, 0.05);
+    /* Slight background to see it */
+    cursor: col-resize;
+    position: relative;
+    z-index: 500;
+    transition: background 0.2s;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    outline: none;
+}
+
+.resize-handle:hover,
+.resize-handle[data-separator="hover"],
+.resize-handle[data-separator="active"] {
+    background: rgba(0, 212, 255, 0.3);
+}
+
+.resize-handle::after {
+    content: '';
+    width: 2px;
+    height: 60px;
+    background: rgba(255, 255, 255, 0.4);
+    border-radius: 2px;
+    transition: all 0.2s ease;
+}
+
+.resize-handle:hover::after,
+.resize-handle[data-separator="hover"]::after,
+.resize-handle[data-separator="active"]::after {
+    background: #00d4ff;
+    height: 100px;
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+
+/* ─── Left Sidebar Tabs ──────────────────────────────────── */
+.left-sidebar {
+    flex-direction: column !important;
+    gap: 0 !important;
+}
+
+.left-sidebar-tabs {
+    display: flex;
+    gap: 3px;
+    padding: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.left-sidebar-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.left-tab-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 5px 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.left-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ccc;
+}
+
+.left-tab-btn.active {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 150, 200, 0.1) 100%);
+    border-color: rgba(0, 212, 255, 0.4);
+    color: #00d4ff;
+}
+
+
+@media (max-width: 1400px) {
+    /* Kept for potential future use if needed with flex */
+}
+
+@media (max-width: 1200px) {
+    /* Kept for potential future use if needed with flex */
+}

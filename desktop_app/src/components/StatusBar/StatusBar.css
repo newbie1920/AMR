@@ -1,0 +1,105 @@
+.status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--statusbar-height);
+    padding: 0 var(--spacing-md);
+    background: var(--color-bg-secondary);
+    border-top: 1px solid var(--color-border);
+    font-size: var(--font-size-xs);
+}
+
+.status-section {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.status-item.warning {
+    color: var(--color-warning);
+}
+
+.status-item.success {
+    color: var(--color-success);
+}
+
+.status-item.error {
+    color: var(--color-error);
+}
+
+.status-label {
+    color: var(--color-text-muted);
+}
+
+.status-value {
+    color: var(--color-text-secondary);
+}
+
+.status-value.mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+}
+
+.status-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--color-border);
+}
+
+.status-btn {
+    padding: 2px 8px;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.status-btn:hover {
+    background: var(--color-bg-hover);
+    border-color: var(--color-accent-primary);
+    color: var(--color-text-primary);
+}
+
+.battery {
+    gap: var(--spacing-xs);
+}
+
+.battery-level {
+    color: var(--color-success);
+}
+
+.battery-level.low {
+    color: var(--color-error);
+    animation: pulse 1s infinite;
+}
+
+.latency-good {
+    color: var(--color-success);
+}
+
+.latency-warn {
+    color: var(--color-warning);
+}
+
+.latency-bad {
+    color: var(--color-error);
+}
+
+.behavior-tag {
+    background: var(--color-bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--color-accent-primary) !important;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+}

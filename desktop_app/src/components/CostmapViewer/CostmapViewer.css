@@ -1,0 +1,200 @@
+/* CostmapViewer.css — Costmap panel styling */
+
+.costmap-viewer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+}
+
+.cmv-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.05), transparent);
+}
+
+.cmv-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.cmv-icon {
+    font-size: 16px;
+}
+
+.cmv-zoom {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cmv-zoom-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.2s;
+}
+
+.cmv-zoom-btn:hover {
+    border-color: var(--color-accent-primary);
+}
+
+.cmv-zoom-value {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    width: 24px;
+    text-align: center;
+}
+
+/* Layer Toggles */
+.cmv-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.cmv-layer-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cmv-layer-toggle.active {
+    color: var(--color-text-primary);
+    border-color: var(--color-accent-primary);
+    background: rgba(0, 212, 255, 0.06);
+}
+
+.cmv-layer-toggle input {
+    display: none;
+}
+
+.cmv-layer-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.cmv-layer-dot.static {
+    background: #6b7280;
+}
+
+.cmv-layer-dot.obstacle {
+    background: #ff5000;
+}
+
+.cmv-layer-dot.inflation {
+    background: #ffc800;
+}
+
+.cmv-layer-dot.fleet {
+    background: #ec4899;
+}
+
+.cmv-layer-dot.path {
+    background: #00c8ff;
+}
+
+.cmv-layer-dot.robot {
+    background: #00ff96;
+}
+
+/* Canvas */
+.cmv-canvas-container {
+    flex: 1;
+    overflow: auto;
+    background: #1a1a2e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+}
+
+.cmv-empty {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.cmv-canvas {
+    cursor: crosshair;
+    image-rendering: pixelated;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Inspector */
+.cmv-inspector {
+    display: flex;
+    gap: 16px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-tertiary);
+}
+
+.cmv-inspector-row {
+    display: flex;
+    gap: 4px;
+    font-size: 11px;
+}
+
+.cmv-insp-label {
+    color: var(--color-text-muted);
+}
+
+.cmv-insp-value {
+    color: var(--color-text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+}
+
+/* Legend */
+.cmv-legend {
+    display: flex;
+    gap: 10px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--color-border);
+    justify-content: center;
+}
+
+.cmv-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
+    color: var(--color-text-muted);
+}
+
+.cmv-lg-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+}

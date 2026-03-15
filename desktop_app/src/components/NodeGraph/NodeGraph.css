@@ -1,0 +1,256 @@
+/* NodeGraph.css — Computation graph styling */
+
+.node-graph {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+}
+
+.ng-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.05), transparent);
+}
+
+.ng-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.ng-icon {
+    font-size: 16px;
+}
+
+.ng-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ng-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.ng-toggle input {
+    width: 14px;
+    height: 14px;
+}
+
+.ng-count {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    background: var(--color-bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+}
+
+/* Canvas */
+.ng-canvas {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.ng-node-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.ng-node {
+    position: relative;
+    padding: 10px;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    overflow: hidden;
+}
+
+.ng-node:hover {
+    border-color: var(--node-color);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.ng-node.active {
+    border-color: rgba(var(--node-color), 0.5);
+}
+
+.ng-node.selected {
+    border-width: 2px;
+    background: rgba(var(--node-color), 0.05);
+}
+
+.ng-node.dimmed {
+    opacity: 0.3;
+}
+
+.ng-node.inactive .ng-node-icon {
+    opacity: 0.4;
+}
+
+.ng-node-icon {
+    font-size: 20px;
+    margin-bottom: 4px;
+}
+
+.ng-node-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ng-node-pulse {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    animation: pulse 1.5s ease infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.5;
+        transform: scale(1.5);
+    }
+}
+
+.ng-node-topics {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+}
+
+.ng-topic-badge {
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 1px 4px;
+    border-radius: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ng-topic-badge.pub {
+    color: var(--color-warning);
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.ng-topic-badge.sub {
+    color: var(--color-info);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* Detail Panel */
+.ng-detail {
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-tertiary);
+    padding: 10px 12px;
+}
+
+.ng-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.ng-detail-icon {
+    font-size: 18px;
+}
+
+.ng-detail-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.ng-detail-group {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: auto;
+}
+
+.ng-detail-topics {
+    display: flex;
+    gap: 16px;
+}
+
+.ng-detail-section {
+    flex: 1;
+}
+
+.ng-detail-label {
+    display: block;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.ng-detail-none {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+.ng-detail-topic {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-text-secondary);
+    padding: 2px 0;
+}
+
+.ng-dot.pub {
+    color: var(--color-warning);
+    font-size: 14px;
+}
+
+.ng-dot.sub {
+    color: var(--color-info);
+    font-size: 14px;
+}
+
+.ng-detail-hz {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--color-success);
+    font-weight: 500;
+}

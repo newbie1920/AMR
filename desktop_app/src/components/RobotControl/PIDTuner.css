@@ -1,0 +1,234 @@
+.pid-tuner-container {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 16px;
+    margin-top: 12px;
+}
+
+.config-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.title-icon {
+    font-size: 16px;
+}
+
+/* ─── PWM Monitor ─────────────────────────────────────── */
+.pwm-monitor {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+}
+
+.pwm-monitor-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.pwm-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pwm-bar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pwm-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #ccc;
+    min-width: 60px;
+    font-family: 'Courier New', monospace;
+}
+
+.pwm-bar-track {
+    flex: 1;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 7px;
+    overflow: hidden;
+    position: relative;
+}
+
+.pwm-bar-fill {
+    height: 100%;
+    border-radius: 7px;
+    background: linear-gradient(90deg, #10b981, #34d399);
+    transition: width 0.15s ease-out;
+}
+
+.pwm-bar-fill.reverse {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+/* ─── PID Controls ────────────────────────────────────── */
+.pid-controls-panel {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.pid-slider-group {
+    margin-bottom: 8px;
+}
+
+.pid-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.pid-label-row label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #aaa;
+}
+
+.pid-num-input {
+    width: 70px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: #fff;
+    padding: 2px 6px;
+    font-size: 12px;
+    text-align: right;
+}
+
+.pid-num-input:focus {
+    border-color: #1890ff;
+    outline: none;
+}
+
+.pid-slider-group input[type="range"] {
+    width: 100%;
+    height: 4px;
+    cursor: pointer;
+    accent-color: #1890ff;
+}
+
+.pid-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.apply-pid-btn {
+    flex: 1;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #1890ff, #096dd9);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.apply-pid-btn:hover {
+    filter: brightness(1.15);
+}
+
+.pause-chart-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #ccc;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.pause-chart-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Motor Tuning ───────────────────────────────────── */
+.motor-tuning-panel {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.motor-tuning-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+}
+
+.motor-param-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.motor-param-row label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #aaa;
+    min-width: 80px;
+}
+
+.motor-param-row input[type="range"] {
+    flex: 1;
+    height: 4px;
+    cursor: pointer;
+    accent-color: #f59e0b;
+}
+
+.param-unit {
+    font-size: 11px;
+    color: #666;
+    min-width: 24px;
+}
+
+/* ─── Charts ─────────────────────────────────────────── */
+.pid-charts-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+}
+
+.chart-box {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.chart-title {
+    font-size: 12px;
+    color: #888;
+    margin: 0 0 6px 4px;
+    font-weight: 500;
+}
+
+.chart-wrapper {
+    width: 100%;
+}

@@ -1,0 +1,241 @@
+/* FleetStatusBar.css — Premium Status Bar */
+
+.fleet-status-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-top: 1px solid var(--color-border);
+    min-height: 48px;
+    border-radius: 0;
+}
+
+.status-section {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.status-section.fleet-overview {
+    padding-right: var(--spacing-lg);
+    border-right: 1px solid var(--color-border);
+}
+
+.status-section.selected-robot {
+    flex: 1;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.status-item-sparkline .status-value-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+}
+
+.status-value {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+}
+
+.status-value.mono {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-accent-primary);
+}
+
+.status-value .indicator {
+    margin-right: 4px;
+    color: var(--color-text-muted);
+}
+
+.status-value .indicator.online {
+    color: var(--color-success);
+    text-shadow: 0 0 6px var(--color-success);
+}
+
+/* Robot Badge */
+.robot-badge {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 4px var(--spacing-sm);
+    background: var(--color-bg-tertiary);
+    border: 1px solid;
+    border-radius: var(--radius-md);
+}
+
+.robot-color {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 6px currentColor;
+}
+
+.robot-name {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+}
+
+.offline-notice {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+}
+
+/* Status Badge */
+.status-badge {
+    display: inline-flex;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.status-badge.status-idle {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+}
+
+.status-badge.status-moving {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.status-badge.status-working {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.status-badge.status-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+/* Sparkline */
+.sparkline-svg {
+    opacity: 0.8;
+}
+
+/* Battery */
+.battery-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.battery-shell {
+    width: 28px;
+    height: 12px;
+    border: 1.5px solid var(--color-text-muted);
+    border-radius: 3px;
+    padding: 1px;
+    position: relative;
+}
+
+.battery-shell::after {
+    content: '';
+    position: absolute;
+    right: -4px;
+    top: 3px;
+    width: 2px;
+    height: 4px;
+    background: var(--color-text-muted);
+    border-radius: 0 1px 1px 0;
+}
+
+.battery-fill {
+    height: 100%;
+    border-radius: 1px;
+    transition: width 0.3s, background 0.3s;
+}
+
+.battery-bolt {
+    position: absolute;
+    top: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    animation: pulse 1s infinite;
+}
+
+.battery-text {
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-text-secondary);
+}
+
+/* Latency */
+.latency-dot {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.latency-ring {
+    width: 8px;
+    height: 8px;
+    border: 2px solid;
+    border-radius: 50%;
+}
+
+.latency-ms {
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-text-secondary);
+}
+
+/* E-STOP Button */
+.btn-emergency {
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #fff;
+    background: linear-gradient(135deg, #dc2626, #991b1b);
+    border: 1px solid #ef4444;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+}
+
+.btn-emergency:hover {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+    transform: scale(1.05);
+}
+
+.emergency-confirm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    animation: slideUp 0.2s ease-out;
+}
+
+.emergency-text {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ef4444;
+}
+
+/* Actions */
+.status-actions {
+    margin-left: auto;
+}
+
+.divider-vertical {
+    width: 1px;
+    height: 24px;
+    background: var(--color-border);
+    margin: 0 var(--spacing-xs);
+}

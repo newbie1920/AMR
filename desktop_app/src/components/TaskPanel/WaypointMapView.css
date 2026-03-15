@@ -1,0 +1,29 @@
+/* Waypoint Map View Styles */
+.waypoint-map-container {
+    margin-bottom: 16px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.waypoint-map-view {
+    width: 100%;
+    height: 400px;
+    position: relative;
+    background: #0a0a1a;
+}
+
+.waypoint-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.map-hint {
+    padding: 8px 12px;
+    background: rgba(0, 212, 255, 0.1);
+    border-top: 1px solid rgba(0, 212, 255, 0.2);
+    font-size: 11px;
+    color: #00d4ff;
+    text-align: center;
+}

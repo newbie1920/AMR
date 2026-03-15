@@ -1,0 +1,134 @@
+.right-sidebar-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: linear-gradient(180deg, rgba(20, 20, 35, 0.95) 0%, rgba(15, 15, 30, 0.98) 100%);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* Tab Buttons — scrollable for many tabs */
+.sidebar-tabs {
+    display: flex;
+    gap: 3px;
+    padding: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.sidebar-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.tab-btn {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 10px;
+    min-width: 48px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    color: #666;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.tab-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ccc;
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 150, 200, 0.1) 100%);
+    border-color: rgba(0, 212, 255, 0.4);
+    color: #00d4ff;
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.08);
+    position: relative;
+}
+
+.tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: #00d4ff;
+    border-radius: 1px 1px 0 0;
+}
+
+/* ─── Tab Group Separator ────────────────────────────────── */
+.tab-group-separator {
+    width: 1px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 0 4px;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.tab-group-label {
+    writing-mode: horizontal-tb;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.2);
+    flex-shrink: 0;
+    align-self: flex-end;
+    padding-bottom: 6px;
+    padding-right: 2px;
+    padding-left: 2px;
+}
+
+.tab-icon {
+    font-size: 15px;
+    line-height: 1;
+}
+
+.tab-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+/* Tab Content */
+.sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+}
+
+.sidebar-content>* {
+    height: 100%;
+}
+
+/* Scrollbar Styling */
+.sidebar-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}

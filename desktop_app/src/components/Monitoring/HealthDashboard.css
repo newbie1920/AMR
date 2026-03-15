@@ -1,0 +1,66 @@
+.health-dashboard {
+    padding: 12px;
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.section-title {
+    margin: 0 0 12px 0;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.health-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.health-card {
+    background: rgba(30, 41, 59, 0.8);
+    padding: 10px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.module-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.module-name {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #cbd5e1;
+}
+
+.status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    box-shadow: 0 0 8px currentColor;
+}
+
+.module-metrics {
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+}
+
+.hz-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #f8fafc;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.hz-unit {
+    font-size: 0.65rem;
+    color: #64748b;
+}

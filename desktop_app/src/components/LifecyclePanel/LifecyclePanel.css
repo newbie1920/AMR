@@ -1,0 +1,295 @@
+/* LifecyclePanel.css — Lifecycle management panel styling */
+
+.lifecycle-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+}
+
+.lcp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.05), transparent);
+}
+
+.lcp-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.lcp-icon {
+    font-size: 16px;
+}
+
+.lcp-btn {
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 500;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lcp-btn:hover {
+    border-color: var(--color-accent-primary);
+}
+
+.lcp-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.lcp-btn-activate-all {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #10b981;
+}
+
+/* State Diagram */
+.lcp-state-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-border);
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.lcp-state-node {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--color-bg-primary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-border);
+}
+
+.lcp-state-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.lcp-state-name {
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    letter-spacing: 0.3px;
+}
+
+.lcp-state-arrow {
+    font-size: 10px;
+    color: var(--color-text-muted);
+}
+
+/* Node List */
+.lcp-node-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.lcp-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.lcp-node-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background 0.15s;
+}
+
+.lcp-node-row:hover {
+    background: var(--color-bg-hover);
+}
+
+.lcp-node-row.selected {
+    background: rgba(0, 212, 255, 0.06);
+    border-left: 2px solid var(--color-accent-primary);
+}
+
+.lcp-node-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+.lcp-node-icon {
+    font-size: 12px;
+}
+
+.lcp-node-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.lcp-node-state {
+    font-size: 10px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.3px;
+}
+
+.lcp-error-msg {
+    font-size: 9px;
+    color: #ef4444;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Detail Panel */
+.lcp-detail {
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-tertiary);
+    padding: 10px 12px;
+}
+
+.lcp-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.lcp-detail-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.lcp-detail-state {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Transitions */
+.lcp-transitions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.lcp-trans-btn {
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 500;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lcp-trans-btn:hover {
+    border-color: var(--color-accent-primary);
+}
+
+.lcp-trans-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.lcp-trans-configure {
+    border-color: rgba(107, 114, 128, 0.3);
+}
+
+.lcp-trans-activate {
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #10b981;
+}
+
+.lcp-trans-deactivate {
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
+}
+
+.lcp-trans-cleanup {
+    border-color: rgba(107, 114, 128, 0.3);
+}
+
+.lcp-trans-shutdown {
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+/* History */
+.lcp-history {
+    margin-top: 8px;
+}
+
+.lcp-history-title {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.lcp-history-list {
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.lcp-history-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    padding: 2px 0;
+}
+
+.lcp-hist-time {
+    color: var(--color-text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    min-width: 60px;
+}
+
+.lcp-hist-from,
+.lcp-hist-to {
+    font-weight: 500;
+    font-size: 9px;
+}
+
+.lcp-hist-arrow {
+    color: var(--color-text-muted);
+    font-size: 8px;
+}
+
+.lcp-hist-label {
+    font-size: 9px;
+    color: var(--color-text-muted);
+    margin-left: auto;
+    font-style: italic;
+}

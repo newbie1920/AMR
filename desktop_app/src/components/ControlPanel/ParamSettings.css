@@ -1,0 +1,63 @@
+.param-settings {
+    padding: 12px;
+    background: rgba(15, 23, 42, 0.4);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.params-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 250px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.params-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.params-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.param-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.param-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    text-transform: capitalize;
+}
+
+.param-input {
+    width: 60px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: #f8fafc;
+    padding: 2px 6px;
+    font-size: 0.8rem;
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.param-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.param-hint {
+    margin: 12px 0 0 0;
+    font-size: 0.65rem;
+    color: #64748b;
+    font-style: italic;
+    text-align: center;
+}

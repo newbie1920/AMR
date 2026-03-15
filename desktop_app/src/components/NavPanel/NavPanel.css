@@ -1,0 +1,300 @@
+/* NavPanel.css — Navigation controls styling */
+
+.nav-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    overflow-y: auto;
+}
+
+.np-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.05), transparent);
+    flex-shrink: 0;
+}
+
+.np-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.np-icon {
+    font-size: 16px;
+}
+
+.np-state {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Section Labels */
+.np-section-label {
+    display: block;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+/* Pose */
+.np-pose-section {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.np-pose-values {
+    display: flex;
+    gap: 12px;
+}
+
+.np-pose-val {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.np-pose-val b {
+    color: var(--color-text-primary);
+}
+
+/* Goal */
+.np-goal-section {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.np-goal-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.np-input {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-text-primary);
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    outline: none;
+    min-width: 0;
+}
+
+.np-input:focus {
+    border-color: var(--color-accent-primary);
+}
+
+.np-input::placeholder {
+    color: var(--color-text-muted);
+}
+
+.np-input-theta {
+    max-width: 50px;
+}
+
+.np-goal-actions {
+    display: flex;
+    gap: 4px;
+}
+
+/* Buttons */
+.np-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.np-btn:hover {
+    border-color: var(--color-accent-primary);
+}
+
+.np-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.np-btn-go {
+    flex: 1;
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+}
+
+.np-btn-go:hover {
+    background: rgba(59, 130, 246, 0.2);
+}
+
+.np-btn-add {
+    flex: 1;
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #10b981;
+}
+
+.np-btn-mode.active {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: var(--color-accent-primary);
+    color: var(--color-accent-primary);
+}
+
+.np-btn-cancel {
+    width: 100%;
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+/* Waypoint List */
+.np-waypoint-list {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.np-waypoint-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+}
+
+.np-wp-num {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-accent-primary);
+    color: #000;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.np-wp-coords {
+    flex: 1;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-text-secondary);
+}
+
+.np-wp-remove {
+    background: none;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px;
+    opacity: 0.6;
+}
+
+.np-wp-remove:hover {
+    opacity: 1;
+}
+
+/* Stats */
+.np-stats {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.np-stat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.np-stat-label {
+    font-size: 9px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+}
+
+.np-stat-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Controls */
+.np-controls {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* Velocity */
+.np-velocity-section {
+    padding: 10px 12px;
+}
+
+.np-vel-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.np-vel-label {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    min-width: 65px;
+}
+
+.np-vel-range {
+    flex: 1;
+    height: 3px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--color-bg-primary);
+    border-radius: 2px;
+    outline: none;
+}
+
+.np-vel-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-accent-primary);
+    cursor: pointer;
+}
+
+.np-vel-value {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--color-text-primary);
+    min-width: 55px;
+    text-align: right;
+}

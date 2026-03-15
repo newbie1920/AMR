@@ -1,0 +1,89 @@
+.fleet-map {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background: var(--color-bg-primary);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.map-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+}
+
+.map-canvas:active {
+    cursor: grabbing;
+}
+
+.map-controls {
+    position: absolute;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.map-controls .btn-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.map-legend {
+    position: absolute;
+    bottom: var(--spacing-md);
+    right: var(--spacing-md);
+    background: rgba(10, 10, 26, 0.9);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm);
+    max-width: 180px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: 4px var(--spacing-xs);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+
+.legend-item:hover {
+    background: var(--color-bg-hover);
+}
+
+.legend-item.selected {
+    background: rgba(0, 212, 255, 0.2);
+}
+
+.legend-color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.legend-name {
+    flex: 1;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.legend-status {
+    font-size: 10px;
+    color: var(--color-text-muted);
+}
+
+.legend-status.online {
+    color: var(--color-success);
+}
