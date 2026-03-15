@@ -575,9 +575,18 @@ void loop() {
       doc["x"] = -robotX; // NEGATE for App
       doc["y"] = -robotY; // NEGATE for App
 
-      // Round to nearest 1000 for display/telemetry
+      // 1. Calculate base rounded values
       long rounded_cL = round((float)cL / 1000.0f) * 1000;
       long rounded_cR = round((float)cR / 1000.0f) * 1000;
+
+      // 2. Snap-to-Sync: If in straight mode and physical diff < 1000 ticks (~3 wheel revs),
+      // force them to match to avoid the ±1000 quantization flicker in display/logs.
+      if (wasStraight && abs(cL - cR) < 1000) {
+        long avg = (cL + cR) / 2;
+        long common = round((float)avg / 1000.0f) * 1000;
+        rounded_cL = common;
+        rounded_cR = common;
+      }
 
       JsonObject enc = doc["enc"].to<JsonObject>();
       enc["l"] = -rounded_cL; // NEGATE for App
