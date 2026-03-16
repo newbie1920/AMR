@@ -163,18 +163,17 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
 
         const current = groupRef.current.position;
         // Frame-rate independent smoothing: 1 - exp(-speed * dt)
-        // Lower speed = smoother/slower convergence (matches 5Hz telemetry rate)
+        // Lower speed = smoother/slower convergence (matches physical robot inertia)
         const posLerp = 1 - Math.exp(-3 * delta);
         const rotLerp = 1 - Math.exp(-3 * delta);
 
         current.x = THREE.MathUtils.lerp(current.x, pose.x, posLerp);
-        current.z = THREE.MathUtils.lerp(current.z, pose.y, posLerp);
+        current.x = THREE.MathUtils.lerp(current.x, pose.x, posLerp);
+        current.z = THREE.MathUtils.lerp(current.z, -pose.y, posLerp); // Map Left to -Z
 
         // Rotate robot to face direction (pose.theta is in radians)
         if (groupRef.current && !isNaN(pose.theta)) {
-            // Negate theta for Three.js Y-rotation convention
-            // Position X,Y were corrected (un-negated) in robotStore,
-            // so rotation must also be flipped to maintain correct visual direction
+            // Synchronize rotation with coordinate mapping (-pose.y -> -pose.theta)
             const targetRotation = -pose.theta;
             groupRef.current.rotation.y = THREE.MathUtils.lerp(
                 groupRef.current.rotation.y,

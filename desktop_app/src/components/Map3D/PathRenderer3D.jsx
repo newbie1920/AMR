@@ -14,7 +14,7 @@ const PathRenderer3D = ({ robot, mission }) => {
         return robot.traveledPath.map(point => [
             point.x,
             PATH_HEIGHT,
-            point.y
+            -point.y // Map Y to -Z to match Robot3D
         ]);
     }, [robot.traveledPath]);
 
@@ -25,7 +25,7 @@ const PathRenderer3D = ({ robot, mission }) => {
         return mission.plannedPath.map(point => [
             point.x,
             PATH_HEIGHT + 0.02,
-            point.y
+            -point.y // Map Y to -Z to match Robot3D
         ]);
     }, [mission?.plannedPath]);
 
@@ -81,7 +81,7 @@ const PathRenderer3D = ({ robot, mission }) => {
                 return (
                     <group
                         key={`waypoint-${index}`}
-                        position={[waypoint.x, PATH_HEIGHT + 0.1, waypoint.y]}
+                        position={[waypoint.x, PATH_HEIGHT + 0.1, -waypoint.y]}
                     >
                         {/* Waypoint base */}
                         <Sphere args={[0.1, 16, 16]}>
@@ -115,7 +115,7 @@ const PathRenderer3D = ({ robot, mission }) => {
             {/* Connection lines between waypoints */}
             {waypointMarkers.length >= 2 && (
                 <Line
-                    points={waypointMarkers.map(wp => [wp.x, PATH_HEIGHT + 0.1, wp.y])}
+                    points={waypointMarkers.map(wp => [wp.x, PATH_HEIGHT + 0.1, -wp.y])}
                     color="#ffffff"
                     lineWidth={1}
                     transparent

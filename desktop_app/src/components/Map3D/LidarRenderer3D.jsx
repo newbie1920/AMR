@@ -12,8 +12,10 @@ const LidarRenderer3D = ({ robot, showAccumulated = true }) => {
         const positions = new Float32Array(points.length * 3);
         points.forEach((point, i) => {
             const angleRad = (point.angle * Math.PI) / 180 + robotPose.theta;
-            const x = robotPose.x + point.distance * Math.cos(angleRad);
-            const z = robotPose.y + point.distance * Math.sin(angleRad);
+            const lidarX_2D = robotPose.x + point.distance * Math.cos(angleRad);
+            const lidarY_2D = robotPose.y + point.distance * Math.sin(angleRad);
+            const x = lidarX_2D;
+            const z = -lidarY_2D; // Map Y to -Z to match Robot3D
             positions[i * 3] = x;
             positions[i * 3 + 1] = 0.15;
             positions[i * 3 + 2] = z;
@@ -30,7 +32,7 @@ const LidarRenderer3D = ({ robot, showAccumulated = true }) => {
         accumulatedPoints.forEach((point, i) => {
             positions[i * 3] = point.x;
             positions[i * 3 + 1] = 0.1;
-            positions[i * 3 + 2] = point.z;
+            positions[i * 3 + 2] = -point.y || -point.z; // Handle both y and z fields for accumulated points
         });
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));

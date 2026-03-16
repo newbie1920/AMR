@@ -39,7 +39,7 @@
 // CONFIGURABLE PARAMETERS
 float WHEEL_RADIUS = 0.033f;     // Meters
 float WHEEL_SEPARATION = 0.170f; // Meters
-int TICKS_PER_REV = 333;         // Ticks per revolution
+int TICKS_PER_REV = 1665;        // Updated from 333 to match 1:150 gearbox (5x difference)
 
 // ENCODER VARIABLES
 volatile long leftTicks = 0;
@@ -320,11 +320,16 @@ void setup() {
             // Phục hồi lại dấu trừ: Xe nhận lệnh v < 0 để đi thẳng
             // (vì quy ước phần cứng Odometry).
             float v = -v_app;
-            float w = -w_app;
+            float w = w_app;
 
             // Kinematics: Convert v, w to wheel speeds (rad/s)
             targetLeftVel = (v - w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
             targetRightVel = (v + w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
+
+            // SAFETY LIMITS: Clamp target wheel speeds to a reasonable maximum (e.g., 15 rad/s)
+            targetLeftVel = constrain(targetLeftVel, -15.0f, 15.0f);
+            targetRightVel = constrain(targetRightVel, -15.0f, 15.0f);
+
             lastCmdTime = millis(); // Reset timeout
           }
         }
