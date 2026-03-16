@@ -1,11 +1,11 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFiManager.h>
-#include <ArduinoOTA.h>
 
 // =======================================================================================
 //   AMR FIRMWARE - STANDARD LOGIC "CW = FORWARD"
@@ -229,9 +229,8 @@ void setup() {
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-  });
+  ArduinoOTA.onError(
+      [](ota_error_t error) { Serial.printf("Error[%u]: ", error); });
   ArduinoOTA.begin();
 
   // 5. WebSocket
@@ -482,7 +481,8 @@ void loop() {
       errRight = 0;
     } else {
       pwmRight = (targetR * ffGain) + (Kp * errRight) + (Ki * intRight);
-      // Clamp to max 255 BEFORE compensation to allow Virtual Axle to reduce power
+      // Clamp to max 255 BEFORE compensation to allow Virtual Axle to reduce
+      // power
       pwmRight = constrain(pwmRight, -255.0f, 255.0f);
     }
 
@@ -579,8 +579,9 @@ void loop() {
       long rounded_cL = round((float)cL / 1000.0f) * 1000;
       long rounded_cR = round((float)cR / 1000.0f) * 1000;
 
-      // 2. Snap-to-Sync: If in straight mode and physical diff < 1000 ticks (~3 wheel revs),
-      // force them to match to avoid the ±1000 quantization flicker in display/logs.
+      // 2. Snap-to-Sync: If in straight mode and physical diff < 1000 ticks (~3
+      // wheel revs), force them to match to avoid the ±1000 quantization
+      // flicker in display/logs.
       if (wasStraight && abs(cL - cR) < 1000) {
         long avg = (cL + cR) / 2;
         long common = round((float)avg / 1000.0f) * 1000;
@@ -612,8 +613,9 @@ void loop() {
       webSocket.broadcastTXT(output);
 
       // DEBUG: Print to Serial Monitor
-      Serial.printf("L_Ticks: %ld | R_Ticks: %ld | vL: %.2f | vR: %.2f%s\n", rounded_cL,
-                    rounded_cR, vL_meas, vR_meas, wasStraight ? " [VA: ACTIVE]" : "");
+      Serial.printf("L_Ticks: %ld | R_Ticks: %ld | vL: %.2f | vR: %.2f%s\n",
+                    rounded_cL, rounded_cR, vL_meas, vR_meas,
+                    wasStraight ? " [VA: ACTIVE]" : "");
     }
   }
 }

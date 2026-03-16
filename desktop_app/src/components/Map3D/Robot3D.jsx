@@ -169,9 +169,9 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
 
         // Rotate robot to face direction (pose.theta is in radians)
         if (groupRef.current && !isNaN(pose.theta)) {
-            // Sign flip (-pose.theta) because ROS Z-up counter-clockwise
-            // must map to Three.js Y-up clockwise when ROS +Y is Three +Z.
-            const targetRotation = -pose.theta;
+            // pose.theta is already corrected in robotStore.js (firmware negation undone)
+            // Three.js Y-rotation matches standard math convention here
+            const targetRotation = pose.theta;
             groupRef.current.rotation.y = THREE.MathUtils.lerp(
                 groupRef.current.rotation.y,
                 targetRotation,

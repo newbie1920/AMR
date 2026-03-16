@@ -75,13 +75,19 @@ const useRobotStore = create((set, get) => {
                 if (!robot) return;
 
                 // Handle firmware variations in naming and units
-                const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
-                const v = msg.v !== undefined ? msg.v : (msg.vx || 0);
-                const w = msg.w !== undefined ? msg.w : (msg.wz || 0);
+                // SIGN FIX: Firmware sends negated values (see main.cpp NEGATE for App)
+                // We negate them back here so the app sees true positive-forward values.
+                const rawTheta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
+                const theta = -rawTheta;
+                const rawV = msg.v !== undefined ? msg.v : (msg.vx || 0);
+                const rawW = msg.w !== undefined ? msg.w : (msg.wz || 0);
+                const v = -rawV;
+                const w = -rawW;
 
                 // Position might not be sent in every message or basic telemetry
-                const posX = msg.x !== undefined ? msg.x : (robot.pose?.x ?? 0);
-                const posY = msg.y !== undefined ? msg.y : (robot.pose?.y ?? 0);
+                // Also negate x, y since firmware sends them negated
+                const posX = msg.x !== undefined ? -msg.x : (robot.pose?.x ?? 0);
+                const posY = msg.y !== undefined ? -msg.y : (robot.pose?.y ?? 0);
 
                 const traveledPath = robot.traveledPath || [];
                 // Only add point if moved significantly (> 2cm)
@@ -101,12 +107,14 @@ const useRobotStore = create((set, get) => {
                         distance: msg.d || 0,
                         heading: msg.h || 0,
                         acceleration: msg.a || 0,
-                        vL_t: msg.vL_t, vL_r: msg.vL_r,
-                        vR_t: msg.vR_t, vR_r: msg.vR_r,
+                        vL_t: msg.vL_t != null ? -msg.vL_t : undefined,
+                        vL_r: msg.vL_r != null ? -msg.vL_r : undefined,
+                        vR_t: msg.vR_t != null ? -msg.vR_t : undefined,
+                        vR_r: msg.vR_r != null ? -msg.vR_r : undefined,
                         pwmL: msg.pwmL, pwmR: msg.pwmR,
                         ticks: msg.enc ? {
-                            left: msg.enc.l,
-                            right: msg.enc.r
+                            left: -msg.enc.l,
+                            right: -msg.enc.r
                         } : { left: 0, right: 0 }
                     },
                     traveledPath: newPath.slice(-500)
