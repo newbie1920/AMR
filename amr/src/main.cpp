@@ -375,7 +375,16 @@ void loop() {
     // 3. ODOMETRY (Forward Kinematics)
     // Robot Velocity
     float v_robot = (vR_meas + vL_meas) / 2.0f * WHEEL_RADIUS;
-    float w_robot = (vR_meas - vL_meas) * WHEEL_RADIUS / WHEEL_SEPARATION;
+    float w_robot;
+
+    // Khi Virtual Axle đang active (xe đi thẳng), force w=0 để tránh
+    // tích lũy sai số theta do dao động vận tốc tức thời giữa 2 bánh.
+    // Encoder ticks bằng nhau → xe đang thẳng → không có vận tốc góc.
+    if (wasStraight) {
+      w_robot = 0;
+    } else {
+      w_robot = (vR_meas - vL_meas) * WHEEL_RADIUS / WHEEL_SEPARATION;
+    }
 
     // Pose Integration
     float dist = v_robot * deltaT;

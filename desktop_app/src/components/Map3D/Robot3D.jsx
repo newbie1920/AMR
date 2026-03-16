@@ -162,49 +162,52 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
         if (!pose || isNaN(pose.x) || isNaN(pose.y)) return;
 
         const current = groupRef.current.position;
-        const lerpFactor = 0.1;
+        // Frame-rate independent smoothing: 1 - exp(-speed * dt)
+        // Lower speed = smoother/slower convergence (matches 5Hz telemetry rate)
+        const posLerp = 1 - Math.exp(-3 * delta);
+        const rotLerp = 1 - Math.exp(-3 * delta);
 
-        current.x = THREE.MathUtils.lerp(current.x, pose.x, lerpFactor);
-        current.z = THREE.MathUtils.lerp(current.z, pose.y, lerpFactor);
+        current.x = THREE.MathUtils.lerp(current.x, pose.x, posLerp);
+        current.z = THREE.MathUtils.lerp(current.z, pose.y, posLerp);
 
         // Rotate robot to face direction (pose.theta is in radians)
         if (groupRef.current && !isNaN(pose.theta)) {
-            // pose.theta is already corrected in robotStore.js (firmware negation undone)
-            // Three.js Y-rotation matches standard math convention here
-            const targetRotation = pose.theta;
+            // Negate theta for Three.js Y-rotation convention
+            // Position X,Y were corrected (un-negated) in robotStore,
+            // so rotation must also be flipped to maintain correct visual direction
+            const targetRotation = -pose.theta;
             groupRef.current.rotation.y = THREE.MathUtils.lerp(
                 groupRef.current.rotation.y,
                 targetRotation,
-                0.2
+                rotLerp
             );
         }
 
-        // Animate wheels (URDF joints or fallback)
-        const linear = robot.velocity?.linear || 0;
-        const angular = robot.velocity?.angular || 0;
-        const separation = 0.17; // Should match firmware
-        const radius = 0.033;
-
-        const wheelSpeedL = ((linear - angular * separation / 2) / radius) * delta;
-        const wheelSpeedR = ((linear + angular * separation / 2) / radius) * delta;
+        // Animate wheels using ENCODER TICKS (absolute rotation, no drift)
+        // wheel_angle = (ticks / TICKS_PER_REV) * 2π
+        const TICKS_PER_REV = 333;
+        const ticksL = robot.telemetry?.ticks?.left || 0;
+        const ticksR = robot.telemetry?.ticks?.right || 0;
+        const wheelAngleL = (ticksL / TICKS_PER_REV) * 2 * Math.PI;
+        const wheelAngleR = (ticksR / TICKS_PER_REV) * 2 * Math.PI;
 
         if (useURDF) {
-            // Animate URDF wheel joints
+            // Set URDF wheel joints to absolute angle from encoder
             const jointPairs = [
-                { name: 'left_wheel_joint', speed: wheelSpeedL },
-                { name: 'right_wheel_joint', speed: wheelSpeedR }
+                { name: 'left_wheel_joint', angle: wheelAngleL },
+                { name: 'right_wheel_joint', angle: wheelAngleR }
             ];
             for (const pair of jointPairs) {
                 const jRef = jointRefs.current[pair.name];
                 if (jRef) {
-                    jRef.rotation.z += pair.speed;
+                    jRef.rotation.z = pair.angle;
                 }
             }
         } else {
             // Fallback wheel animation
             if (leftWheelRef.current && rightWheelRef.current) {
-                leftWheelRef.current.rotation.x += wheelSpeedL;
-                rightWheelRef.current.rotation.x += wheelSpeedR;
+                leftWheelRef.current.rotation.x = wheelAngleL;
+                rightWheelRef.current.rotation.x = wheelAngleR;
             }
         }
 

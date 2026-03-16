@@ -75,17 +75,14 @@ const useRobotStore = create((set, get) => {
                 if (!robot) return;
 
                 // Handle firmware variations in naming and units
-                // SIGN FIX: Firmware sends negated values (see main.cpp NEGATE for App)
-                // We negate them back here so the app sees true positive-forward values.
-                const rawTheta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
-                const theta = -rawTheta;
-                const rawV = msg.v !== undefined ? msg.v : (msg.vx || 0);
-                const rawW = msg.w !== undefined ? msg.w : (msg.wz || 0);
-                const v = -rawV;
-                const w = -rawW;
+                // NOTE: Firmware sends negated values (see main.cpp "NEGATE for App").
+                // Theta and velocity keep firmware convention (Robot3D uses -pose.theta to handle it).
+                // Only position X,Y are corrected here so the 3D map shows correct direction.
+                const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
+                const v = msg.v !== undefined ? msg.v : (msg.vx || 0);
+                const w = msg.w !== undefined ? msg.w : (msg.wz || 0);
 
-                // Position might not be sent in every message or basic telemetry
-                // Also negate x, y since firmware sends them negated
+                // POSITION FIX: Negate x,y back to true values for correct 3D direction
                 const posX = msg.x !== undefined ? -msg.x : (robot.pose?.x ?? 0);
                 const posY = msg.y !== undefined ? -msg.y : (robot.pose?.y ?? 0);
 
@@ -107,11 +104,13 @@ const useRobotStore = create((set, get) => {
                         distance: msg.d || 0,
                         heading: msg.h || 0,
                         acceleration: msg.a || 0,
+                        // DISPLAY FIX: Negate PID velocities so they show positive for forward
                         vL_t: msg.vL_t != null ? -msg.vL_t : undefined,
                         vL_r: msg.vL_r != null ? -msg.vL_r : undefined,
                         vR_t: msg.vR_t != null ? -msg.vR_t : undefined,
                         vR_r: msg.vR_r != null ? -msg.vR_r : undefined,
                         pwmL: msg.pwmL, pwmR: msg.pwmR,
+                        // DISPLAY FIX: Negate encoder ticks so they show positive for forward
                         ticks: msg.enc ? {
                             left: -msg.enc.l,
                             right: -msg.enc.r
