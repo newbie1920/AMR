@@ -321,7 +321,7 @@ void setup() {
             // Phục hồi lại dấu trừ: Xe nhận lệnh v < 0 để đi thẳng
             // (vì quy ước phần cứng Odometry).
             float v = -v_app;
-            float w = -w_app;
+            float w = w_app;
 
             // Kinematics: Convert v, w to wheel speeds (rad/s)
             targetLeftVel = (v - w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
@@ -628,9 +628,9 @@ void loop() {
       serializeJson(doc, output);
       webSocket.broadcastTXT(output);
 
-      // DEBUG: Print to Serial Monitor
+      // DEBUG: Print to Serial Monitor (NEGATE để hiển thị: Tiến = Dương)
       Serial.printf("L_Ticks: %ld | R_Ticks: %ld | vL: %.2f | vR: %.2f%s\n",
-                    rounded_cL, rounded_cR, vL_meas, vR_meas,
+                    -rounded_cL, -rounded_cR, -vL_meas, -vR_meas,
                     wasStraight ? " [VA: ACTIVE]" : "");
     }
   }
