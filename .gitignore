@@ -11,13 +11,10 @@ build/
 __pycache__/
 *.py[cod]
 *$py.class
-venv/
-.venv/
-env/
-.env/
-bin/
-lib/
-include/
+# Remove general lib/ ignore as it catches desktop_app/src/lib/
+# venv/lib/
+# bin/
+# include/
 
 # PlatformIO
 .pio/
