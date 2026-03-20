@@ -400,12 +400,11 @@ void setup() {
             float v_app = doc["linear"];
             float w_app = doc["angular"];
 
-            // TIẾN LÙI: Đã đúng dấu (v < 0 là tiến)
-            float v = -v_app;
+            // TIẾN LÙI: v > 0 là tiến
+            float v = v_app;
 
-            // XOAY TRÁI PHẢI: v < 0 (tiến), để xoay TRÁI thì bánh PHẢI phải nhanh hơn (âm hơn)
-            // w = -w_app kết hợp với targetRight = v + w... sẽ làm vR âm hơn khi w_app dương.
-            float w = -w_app; 
+            // XOAY TRÁI PHẢI: w > 0 là xoay trái
+            float w = w_app; 
 
             targetLeftVel = (v - w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
             targetRightVel = (v + w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
@@ -558,28 +557,28 @@ void loop() {
         lastTelemetryTime = millis();
         JsonDocument doc;
         doc["telem"] = true;
-        doc["vx"] = -v_robot;
-        doc["wz"] = -w_fused;       
-        doc["theta"] = -robotTheta; 
-        doc["h"] = -robotTheta * 180.0f / PI; // Bổ sung góc độ
+        doc["vx"] = v_robot;
+        doc["wz"] = w_fused;       
+        doc["theta"] = robotTheta; 
+        doc["h"] = robotTheta * 180.0f / PI; // Bổ sung góc độ
         doc["d"] = robotDistance;
-        doc["x"] = -robotX;
-        doc["y"] = -robotY;
+        doc["x"] = robotX;
+        doc["y"] = robotY;
 
         // IMU-specific telemetry
         doc["imu"] = imuAvailable;
         doc["imu_cal"] = gyroCalibrated;
         doc["gyroZ"] = gyroZ_raw;                 
-        doc["fTheta"] = -fusedTheta * 180.0f / PI;   
+        doc["fTheta"] = fusedTheta * 180.0f / PI;   
 
         JsonObject enc = doc["enc"].to<JsonObject>();
-        enc["l"] = -cL; // RAW Ticks (App handles display)
-        enc["r"] = -cR;
+        enc["l"] = cL; // RAW Ticks (App handles display)
+        enc["r"] = cR;
 
-        doc["vL_t"] = -targetLeftVel;
-        doc["vR_t"] = -targetRightVel;
-        doc["vL_r"] = -vL_meas;
-        doc["vR_r"] = -vR_meas;
+        doc["vL_t"] = targetLeftVel;
+        doc["vR_t"] = targetRightVel;
+        doc["vL_r"] = vL_meas;
+        doc["vR_r"] = vR_meas;
 
         doc["pwmL"] = (int)lastPwmLeft;
         doc["pwmR"] = (int)lastPwmRight;
