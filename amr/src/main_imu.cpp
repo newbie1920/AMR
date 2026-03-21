@@ -79,10 +79,11 @@ volatile int lastEncodedLeft = 0;
 volatile int lastEncodedRight = 0;
 
 // ─── INVERSION FLAGS ─────────────────────────────────────────────────────────
-bool invertLeftEncoder = true;
-bool invertRightEncoder = true;
-bool invertLeftMotor = true;
-bool invertRightMotor = true;
+// Cấu hình để: TIẾN = Cả 2 Encoder đều tăng (Dương)
+bool invertLeftEncoder = false;
+bool invertRightEncoder = true; // Đảo lại vì thực tế đang bị đếm lùi
+bool invertLeftMotor = false;
+bool invertRightMotor = false;
 
 // ─── CONTROL VARIABLES ──────────────────────────────────────────────────────
 float targetLeftVel = 0;  // rad/s
@@ -92,10 +93,16 @@ long lastTicksL = 0;
 long lastTicksR = 0;
 unsigned long lastCmdTime = 0;
 
-// ─── MOTOR TUNING (OPEN-LOOP SCALE) ──────────────────────────────────────────
-float ffGain = 18.0f;     // Scale từ rad/s sang PWM
-float ffGainLeft = 18.0f;
+// ─── MOTOR TUNING (FEED-FORWARD) ─────────────────────────────────────────────
+float ffGain = 25.0f;
+float ffGainLeft = 25.0f;
 int minPWM = 50;
+
+// ─── VELOCITY PID (DUAL WHEEL CONTROL) ────────────────────────────────────────
+float Kp_vel = 4.0f;  
+float Ki_vel = 8.0f;  
+float errorIntL = 0;
+float errorIntR = 0;
 unsigned long cmdTimeout = 500;
 
 float lastPwmLeft = 0;
@@ -403,11 +410,14 @@ void setup() {
             // TIẾN LÙI: v > 0 là tiến
             float v = v_app;
 
-            // XOAY TRÁI PHẢI: w > 0 là xoay trái
+            // w > 0 (app) = xoay TRÁI (theo app) -> w thực tế dương
+            // w < 0 (app) = xoay PHẢI (theo app) -> w thực tế âm
             float w = w_app; 
 
-            targetLeftVel = (v - w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
-            targetRightVel = (v + w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
+            // Công thức đã đảo dấu xoay: 
+            // vL = v + w*L/2, vR = v - w*L/2
+            targetLeftVel  = (v + w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
+            targetRightVel = (v - w * WHEEL_SEPARATION / 2.0f) / WHEEL_RADIUS;
 
             targetLeftVel = constrain(targetLeftVel, -15.0f, 15.0f);
             targetRightVel = constrain(targetRightVel, -15.0f, 15.0f);
@@ -458,8 +468,8 @@ void loop() {
         mpu6050_calibrate(gyroZ_raw);
         gyroZ_raw = 0; // Chưa calibrate xong, chưa dùng
       } else {
-        // Trừ bias
-        gyroZ_raw -= gyroZBias;
+        // Trừ bias và ĐẢO DẤU để khớp hướng với App (Xoay phải app tăng góc)
+        gyroZ_raw = -(gyroZ_raw - gyroZBias);
 
         // Lọc nhiễu nhỏ (dead zone)
         if (fabs(gyroZ_raw) < 0.005f) {
@@ -518,28 +528,47 @@ void loop() {
       robotTheta = encoderTheta;
     }
 
-    // Pose Integration
+    // Pose Integration (Dùng dấu trừ để đồng bộ hướng mô phỏng với App Desktop)
     float dist = v_robot * deltaT;
     robotDistance += fabs(dist);
-    robotX += dist * cos(robotTheta);
-    robotY += dist * sin(robotTheta);
+    robotX -= dist * cos(robotTheta);
+    robotY -= dist * sin(robotTheta);
 
-    // ─── SIMPLE OPEN-LOOP MOTOR CONTROL ──────────────────────────
-    // PWM = (targetVel * gain) + minPWM_deadband
+    // ─── DUAL-WHEEL VELOCITY PID CONTROL ──────────────────────────
     float pwmLeft = 0;
     float pwmRight = 0;
 
-    if (fabs(targetL) > 0.01f) {
-      pwmLeft = targetL * ffGainLeft;
-      pwmLeft += (targetL > 0) ? minPWM : -minPWM;
-    }
-    if (fabs(targetR) > 0.01f) {
-      pwmRight = targetR * ffGain;
-      pwmRight += (targetR > 0) ? minPWM : -minPWM;
+    if (fabs(targetL) > 0.1f || fabs(targetR) > 0.1f) {
+        // 1. Tính Error
+        float errL = targetL - vL_meas;
+        float errR = targetR - vR_meas;
+
+        // 2. Tích phân (Integral)
+        errorIntL += errL * deltaT;
+        errorIntR += errR * deltaT;
+        
+        // Anti-windup
+        errorIntL = constrain(errorIntL, -50.0f, 50.0f);
+        errorIntR = constrain(errorIntR, -50.0f, 50.0f);
+
+        // 3. Kết hợp Feed-Forward (Dựa trên ffGain) + PID
+        // u = (target * ffGain) + (Kp * err) + (Ki * integral)
+        pwmLeft  = (targetL * ffGainLeft) + (Kp_vel * errL) + (Ki_vel * errorIntL);
+        pwmRight = (targetR * ffGain)     + (Kp_vel * errR) + (Ki_vel * errorIntR);
+
+        // Bù Deadband (minPWM)
+        pwmLeft  += (targetL > 0) ? minPWM : -minPWM;
+        pwmRight += (targetR > 0) ? minPWM : -minPWM;
+    } else {
+        // Stop: Reset PID
+        errorIntL = 0;
+        errorIntR = 0;
+        pwmLeft = 0;
+        pwmRight = 0;
     }
     
-    // Clamp
-    pwmLeft = constrain(pwmLeft, -255.0f, 255.0f);
+    // Clamp output chuẩn 8-bit
+    pwmLeft  = constrain(pwmLeft, -255.0f, 255.0f);
     pwmRight = constrain(pwmRight, -255.0f, 255.0f);
 
     lastPwmLeft = pwmLeft;

@@ -91,16 +91,16 @@ class NavController {
                 const rotCorr = robot?.config?.rotationCorrection || 1.0;
                 
                 const theta = msg.h !== undefined ? (msg.h * Math.PI / 180 * rotCorr) : (msg.theta ?? this._robotPose.theta);
-                const x = msg.x !== undefined ? -msg.x : (this._robotPose.x ?? 0);
-                const y = msg.y !== undefined ? -msg.y : (this._robotPose.y ?? 0);
+                const x = msg.x !== undefined ? msg.x : (this._robotPose.x ?? 0);
+                const y = msg.y !== undefined ? msg.y : (this._robotPose.y ?? 0);
 
                 this._robotPose = { x, y, theta };
                 
                 // VELOCITY SIGN FIX: Positions are double-negated (firmware negates, we negate again)
                 // to get true world coordinates. Velocities MUST also be negated to match.
                 // Without this, DWA thinks +v = forward but firmware interprets +v as backward.
-                const linear = msg.v !== undefined ? -msg.v : -(msg.vx ?? 0);
-                const angular = msg.w !== undefined ? -msg.w : -(msg.wz ?? 0);
+                const linear = msg.v !== undefined ? msg.v : (msg.vx ?? 0);
+                const angular = msg.w !== undefined ? msg.w : (msg.wz ?? 0);
                 this._robotVel = { linear, angular };
                 this.tf.updateOdom(this._robotPose);
 
@@ -110,14 +110,14 @@ class NavController {
                 }
             }).catch(() => {
                 const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta ?? this._robotPose.theta);
-                const x = msg.x !== undefined ? -msg.x : (this._robotPose.x ?? 0);
-                const y = msg.y !== undefined ? -msg.y : (this._robotPose.y ?? 0);
+                const x = msg.x !== undefined ? msg.x : (this._robotPose.x ?? 0);
+                const y = msg.y !== undefined ? msg.y : (this._robotPose.y ?? 0);
                 
                 this._robotPose = { x, y, theta };
 
                 // VELOCITY SIGN FIX (fallback path): same negation as primary path
-                const linear = msg.v !== undefined ? -msg.v : -(msg.vx ?? 0);
-                const angular = msg.w !== undefined ? -msg.w : -(msg.wz ?? 0);
+                const linear = msg.v !== undefined ? msg.v : (msg.vx ?? 0);
+                const angular = msg.w !== undefined ? msg.w : (msg.wz ?? 0);
                 this._robotVel = { linear, angular };
                 this.tf.updateOdom(this._robotPose);
                 
@@ -380,7 +380,7 @@ class NavController {
         // NavController positions are double-negated (true world coords),
         // but firmware also negates incoming velocity (v = -v_app).
         // Without this negation, sending +v makes robot go backward from NavController's view.
-        robotBridge.cmdVel(this._robotId, -smoothed.linear, -smoothed.angular);
+        robotBridge.cmdVel(this._robotId, smoothed.linear, smoothed.angular);
     }
 
     // ─── State machine ─────────────────────────────────────────────────────────

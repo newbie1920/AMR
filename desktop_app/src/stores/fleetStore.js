@@ -21,8 +21,8 @@ const useFleetStore = create(
 
             // Global settings
             settings: {
-                defaultLinearSpeed: 0.3,
-                defaultAngularSpeed: 2.0,
+                defaultLinearSpeed: 0.25, // ~7.5 rad/s
+                defaultAngularSpeed: 3.0,
                 autoReconnect: true,
                 telemetryInterval: 200,
                 language: 'en',
@@ -52,10 +52,10 @@ const useFleetStore = create(
 
                     taskQueue: [],
                     currentTask: null,
-                    maxLinearSpeed: 0.2,
-                    maxAngularSpeed: 2.0,
-                    linearSpeed: 0.15,
-                    angularSpeed: 1.0,
+                    maxLinearSpeed: 0.35,
+                    maxAngularSpeed: 4.0,
+                    linearSpeed: 0.25,
+                    angularSpeed: 2.0,
 
                     // Calibration parameters
                     config: {
@@ -71,10 +71,10 @@ const useFleetStore = create(
                         min_pwm: 50,
                         cmd_timeout: 500,
                         // DWA Planner (desktop)
-                        dwa_maxLinearVel: 0.2,
-                        dwa_maxAngularVel: 1.0,
-                        dwa_maxLinearAcc: 0.5,
-                        dwa_maxAngularAcc: 2.0,
+                        dwa_maxLinearVel: 0.3,
+                        dwa_maxAngularVel: 3.0,
+                        dwa_maxLinearAcc: 1.0,
+                        dwa_maxAngularAcc: 4.0,
                         dwa_goalTolerance: 0.15,
                         dwa_simTime: 1.5,
                     },
