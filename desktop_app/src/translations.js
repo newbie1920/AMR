@@ -49,6 +49,7 @@ const translations = {
         control: "Control",
         diagnostics: "Diagnostics",
         advanced: "Advanced",
+        toggle_led: "Toggle LED",
 
         // Nav Panel
         navigation: "Navigation",
@@ -513,6 +514,7 @@ const translations = {
         control: "Điều khiển",
         diagnostics: "Giám sát",
         advanced: "Nâng cao",
+        toggle_led: "Bật/Tắt Đèn",
 
         // Nav Panel
         navigation: "Dẫn đường",

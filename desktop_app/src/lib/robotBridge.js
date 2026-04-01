@@ -45,14 +45,14 @@ export const MSG = {
 
 // ─── Default config ────────────────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
-    reconnectBaseMs: 2000,   // Initial reconnect delay (fast recovery)
-    reconnectMaxMs: 15000,  // Max reconnect delay
+    reconnectBaseMs: 1000,   // Reduced from 2000 for faster recovery
+    reconnectMaxMs: 5000,    // Reduced from 10000 to retry faster
     reconnectFactor: 1.5,    // Exponential backoff factor
-    heartbeatMs: 5000,   // How often to check connection health
-    pingIntervalMs: 3000,  // Ping keep-alive interval
-    staleTimeoutMs: 8000,  // Force reconnect if no data for this long
-    commandTimeoutMs: 200,    // Max cmd_vel interval (safety: stop if no cmd in X ms)
-    latencyWindowSize: 20,     // Rolling window for latency stats
+    heartbeatMs: 3000,       // More frequent checks
+    pingIntervalMs: 2500,    // Ping keep-alive interval
+    staleTimeoutMs: 10000,   // Detect failure in 10s (increased to tolerate WiFi jitter)
+    commandTimeoutMs: 200,   // Max cmd_vel interval (safety: stop if no cmd in X ms)
+    latencyWindowSize: 20,   // Rolling window for latency stats
 };
 
 // ─── Main Bridge Class ─────────────────────────────────────────────────────────
@@ -293,14 +293,17 @@ class RobotBridge {
      */
     _handleTelem(robotId, msg) {
         // Update TF tree: odom → base_footprint
-        // Only update if this is the primary robot (or scoped TF tree per robot in fleet)
-        if (robotId === 'robot_1' || this._robots.size === 1) {
+        // This updates the shared singleton TF tree used for global rendering.
+        if (true) { // Process telemetry for all robots
             // Mapping keys to match firmware (main.cpp)
+            // FIRMWARE CONVENTION: Standard CCW ROS coordinates
+            const x = msg.x !== undefined ? msg.x : 0;
+            const y = msg.y !== undefined ? msg.y : 0;
             const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
 
             tfTree.updateOdom({
-                x: msg.x || 0,
-                y: msg.y || 0,
+                x: x,
+                y: y,
                 theta: theta,
             });
 
@@ -337,6 +340,39 @@ class RobotBridge {
      * @param {number} angular - rad/s (CCW positive)
      */
     cmdVel(robotId, linear, angular) {
+        const conn = this._robots.get(robotId);
+        if (!conn) return;
+
+        const now = Date.now();
+        const isStop = (linear === 0 && angular === 0);
+
+        // Clear any pending queued command
+        if (conn._cmdVelTimeout) {
+            clearTimeout(conn._cmdVelTimeout);
+            conn._cmdVelTimeout = null;
+        }
+
+        // 1. Drop redundant STOP commands. Only send 1 STOP every 500ms (for keep-alive)
+        if (isStop && conn._lastIsStop && conn._lastCmdVelMs && (now - conn._lastCmdVelMs < 500)) {
+            return;
+        }
+
+        // 2. Hard limit for motion commands (max 20Hz = 50ms interval)
+        if (conn._lastCmdVelMs && (now - conn._lastCmdVelMs < 50)) {
+            if (!isStop) {
+                // Queue this to be sent as soon as the throttle window opens
+                const delay = 50 - (now - conn._lastCmdVelMs);
+                conn._cmdVelTimeout = setTimeout(() => {
+                    conn._cmdVelTimeout = null;
+                    this.cmdVel(robotId, linear, angular);
+                }, delay);
+                return; 
+            }
+        }
+
+        conn._lastCmdVelMs = Date.now();
+        conn._lastIsStop = isStop;
+
         this._send(robotId, {
             type: MSG.CMD_VEL,
             linear: Number(linear.toFixed(4)),
@@ -450,6 +486,17 @@ class RobotBridge {
             lastTelemAgo: conn.lastTelemMs ? Date.now() - conn.lastTelemMs : null,
             lastStatusAgo: conn.lastStatusMs ? Date.now() - conn.lastStatusMs : null,
         };
+    }
+
+    getRobotIP(robotId) {
+        const conn = this._robots.get(robotId);
+        if (!conn || !conn.url) return robotId;
+        try {
+            const url = new URL(conn.url);
+            return url.hostname;
+        } catch (e) {
+            return robotId;
+        }
     }
 
     getAllStatus() {

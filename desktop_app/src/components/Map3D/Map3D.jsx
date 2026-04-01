@@ -31,7 +31,7 @@ const CameraController = ({ viewMode, selectedRobot, controlsRef }) => {
 
         const targetX = selectedRobot.pose.x;
         const targetZ = -selectedRobot.pose.y; // Map Left to -Z to match Robot3D
-        const targetTheta = (selectedRobot.pose.theta || 0); // Synchronize rotation
+        const targetTheta = -(selectedRobot.pose.theta || 0); // Corrected mapping: Y_world -> -Z_three requires sign flip
 
         // If very first frame, snap immediately to prevent wild flying
         if (isFirstFrame.current) {
@@ -40,13 +40,18 @@ const CameraController = ({ viewMode, selectedRobot, controlsRef }) => {
             interpTheta.current = targetTheta;
             isFirstFrame.current = false;
         } else {
-            // Apply EXACT same smooth lerp factors as Robot3D.jsx
-            const posLerp = 1 - Math.exp(-3 * delta);
-            const rotLerp = 1 - Math.exp(-3 * delta);
+            // Apply smooth lerp factors
+            const posLerp = 1 - Math.exp(-4 * delta);
+            const rotLerp = 1 - Math.exp(-5 * delta); // Faster rotation for camera
 
             interpX.current = THREE.MathUtils.lerp(interpX.current, targetX, posLerp);
             interpZ.current = THREE.MathUtils.lerp(interpZ.current, targetZ, posLerp);
-            interpTheta.current = THREE.MathUtils.lerp(interpTheta.current, targetTheta, rotLerp);
+            
+            // Handle angle wrap-around for smooth rotation
+            let deltaTheta = targetTheta - interpTheta.current;
+            while (deltaTheta > Math.PI) deltaTheta -= 2 * Math.PI;
+            while (deltaTheta < -Math.PI) deltaTheta += 2 * Math.PI;
+            interpTheta.current += deltaTheta * rotLerp;
         }
 
         const robotX = interpX.current;
@@ -56,32 +61,24 @@ const CameraController = ({ viewMode, selectedRobot, controlsRef }) => {
         if (viewMode === 'firstPerson') {
             // First person view - camera at robot position looking forward
             const cameraHeight = 0.5;
-            const lookDistance = 3;
+            const lookDistance = 5;
 
-            targetPosition.current.set(
-                robotX,
-                cameraHeight,
-                robotZ
-            );
-
+            targetPosition.current.set(robotX, cameraHeight, robotZ);
             targetLookAt.current.set(
                 robotX + Math.cos(robotTheta) * lookDistance,
-                cameraHeight * 0.8,
+                cameraHeight * 0.9,
                 robotZ + Math.sin(robotTheta) * lookDistance
             );
 
-            // Bind camera tightly to interpolated robot position
+            // Bind camera tightly
             camera.position.copy(targetPosition.current);
-            camera.lookAt(targetLookAt.current); // Use lookAt directly since robot pos/rot is already smoothed
+            camera.lookAt(targetLookAt.current);
 
-            // Disable orbit controls in first person
-            if (controlsRef.current) {
-                controlsRef.current.enabled = false;
-            }
+            if (controlsRef.current) controlsRef.current.enabled = false;
         } else if (viewMode === 'thirdPerson') {
-            // Third person view - camera behind and above robot
-            const distance = 3;
-            const height = 2;
+            // Third person view - camera behind and above robot, looking at center
+            const distance = 8;
+            const height = 4.5;
 
             // Position camera behind robot
             targetPosition.current.set(
@@ -90,16 +87,14 @@ const CameraController = ({ viewMode, selectedRobot, controlsRef }) => {
                 robotZ - Math.sin(robotTheta) * distance
             );
 
-            targetLookAt.current.set(robotX, 0.3, robotZ);
+            // Directly center the robot in the viewport
+            targetLookAt.current.set(robotX, 0.4, robotZ);
 
-            // Smoothly track the moving targetPosition for extra 'camera drone' feel
-            camera.position.lerp(targetPosition.current, 1 - Math.exp(-5 * delta));
+            // Smoothly track
+            camera.position.lerp(targetPosition.current, 1 - Math.exp(-6 * delta));
             camera.lookAt(targetLookAt.current);
 
-            // Disable orbit controls in third person
-            if (controlsRef.current) {
-                controlsRef.current.enabled = false;
-            }
+            if (controlsRef.current) controlsRef.current.enabled = false;
         } else if (viewMode === 'follow') {
             // Follow mode - orbit around robot position
             if (controlsRef.current) {
@@ -179,10 +174,10 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
 
     // Camera presets
     const midX = WAREHOUSE_WIDTH / 2;
-    const midZ = WAREHOUSE_HEIGHT / 2;
+    const midZ = -WAREHOUSE_HEIGHT / 2;
     const cameraPresets = {
         top: { position: [midX, 25, midZ], target: [midX, 0, midZ] },
-        isometric: { position: [WAREHOUSE_WIDTH * 1.3, 15, WAREHOUSE_HEIGHT * 1.3], target: [midX, 0, midZ] },
+        isometric: { position: [WAREHOUSE_WIDTH * 1.3, 15, WAREHOUSE_HEIGHT * 0.2], target: [midX, 0, midZ] },
     };
 
     const handleCameraPreset = (mode) => {
@@ -210,7 +205,7 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
 
     const handleFloorClick = useCallback((point) => {
         if (isSelectingWaypoint && onWaypointClick) {
-            onWaypointClick({ x: point.x, y: point.z });
+            onWaypointClick({ x: point.x, y: -point.z });
         }
     }, [isSelectingWaypoint, onWaypointClick]);
 

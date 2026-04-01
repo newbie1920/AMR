@@ -3,7 +3,7 @@ import { useRobotStore } from '../../stores/robotStore';
 import { useFleetStore } from '../../stores/fleetStore';
 import translations from '../../translations';
 
-const TaskCard = ({ mission, robots, missions, onAssign, onCancel, onRemove, onStart, onStop, onEdit }) => {
+const TaskCard = ({ mission, robots, missions, onAssign, onCancel, onRemove, onStart, onStop, onEdit, onReset }) => {
     const { settings } = useFleetStore();
     const [showAssign, setShowAssign] = useState(false);
     const lang = settings.language || 'en';
@@ -186,16 +186,25 @@ const TaskCard = ({ mission, robots, missions, onAssign, onCancel, onRemove, onS
             )}
 
             {mission.status === 'assigned' && (
-                <div className="task-actions">
+                <div className="task-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <button
-                        className="btn btn-primary btn-sm btn-full"
+                        className="btn btn-primary btn-sm flex-1"
                         onClick={onStart}
                         disabled={!isAssignedRobotOnline}
-                        title={!isAssignedRobotOnline ? t('robot_offline') : t('start')}
+                        title={!isAssignedRobotOnline ? t('robot_offline') : (mission.currentWaypointIndex > 0 ? (t('resume') || 'Resume') : t('start'))}
                     >
                         <span className="btn-icon">▶</span>
-                        {t('start')}
+                        {mission.currentWaypointIndex > 0 ? (t('resume') || 'Resume') : t('start')}
                     </button>
+                    {mission.currentWaypointIndex > 0 && (
+                        <button
+                            className="btn btn-warning btn-sm"
+                            onClick={onReset}
+                            title={t('reset') || 'Reset'}
+                        >
+                            🔄
+                        </button>
+                    )}
                     <button
                         className="btn btn-ghost btn-sm"
                         onClick={onCancel}
@@ -214,7 +223,12 @@ const TaskCard = ({ mission, robots, missions, onAssign, onCancel, onRemove, onS
                             </span>
                             {robotState && (
                                 <>
-                                    <span className="behavior-tag" style={{ fontSize: '10px', padding: '2px 6px' }}>{robotState.activeBehavior}</span>
+                                    <span className="behavior-tag" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                        { (robotState.activeBehavior && typeof robotState.activeBehavior === 'object') 
+                                            ? (robotState.activeBehavior.name || 'Idle') 
+                                            : (robotState.activeBehavior ? (t(robotState.activeBehavior.toLowerCase()) || robotState.activeBehavior) : 'Idle')
+                                        }
+                                    </span>
                                     <span className={`status-indicator status-${robotState.navigationStatus}`} style={{ fontSize: '10px' }}>
                                         {t('nav_' + robotState.navigationStatus) || robotState.navigationStatus}
                                     </span>
@@ -268,9 +282,17 @@ const TaskCard = ({ mission, robots, missions, onAssign, onCancel, onRemove, onS
             )}
 
             {mission.status === 'failed' && (
-                <div className="task-result failed">
+                <div className="task-result failed" style={{ display: 'flex', alignItems: 'center' }}>
                     <span className="result-icon">✕</span>
                     <span className="result-text">{t('canceled')}</span>
+                    <button 
+                        className="btn btn-primary btn-sm" 
+                        style={{ marginLeft: 'auto' }}
+                        onClick={onReset}
+                        title={t('reset') || 'Reset'}
+                    >
+                        🔄 {t('reset') || 'Reset'}
+                    </button>
                 </div>
             )}
         </div>

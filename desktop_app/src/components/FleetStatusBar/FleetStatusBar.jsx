@@ -15,6 +15,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useFleetStore } from '../../stores/fleetStore';
 import { useMissionStore } from '../../stores/missionStore';
 import translations from '../../translations';
+import SerialMonitorModal from '../SerialMonitor/SerialMonitorModal';
 import './FleetStatusBar.css';
 
 // ─── Mini Sparkline ──────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ const FleetStatusBar = () => {
     const t = (key) => translations[lang][key] || key;
 
     const [showEmergencyConfirm, setShowEmergencyConfirm] = useState(false);
+    const [isMonitorOpen, setIsMonitorOpen] = useState(false);
     const [velocityHistory, setVelocityHistory] = useState([]);
 
     const connectedCount = robots.filter(r => r.connected).length;
@@ -134,10 +136,27 @@ const FleetStatusBar = () => {
         return () => clearInterval(interval);
     }, [selectedRobot?.velocity?.linear]);
 
+    const [monitorStatus, setMonitorStatus] = useState('disconnected');
+
+    useEffect(() => {
+        if (window.electronAPI && window.electronAPI.onMonitorStatus) {
+            return window.electronAPI.onMonitorStatus((data) => {
+                setMonitorStatus(data.status);
+            });
+        }
+    }, [selectedRobotId]);
+
     const handleEmergencyStop = useCallback(() => {
         stopAllRobots();
         setShowEmergencyConfirm(false);
     }, [stopAllRobots]);
+
+    const getMonitorButtonClass = () => {
+        if (monitorStatus === 'connected') return 'btn-monitor connected';
+        if (monitorStatus === 'connecting') return 'btn-monitor connecting';
+        if (monitorStatus === 'error') return 'btn-monitor error';
+        return 'btn-monitor';
+    };
 
     return (
         <div className="fleet-status-bar glass-card">
@@ -181,11 +200,18 @@ const FleetStatusBar = () => {
                                 </div>
                             </div>
 
-                            {/* Position */}
+                            {/* Position & Trip */}
                             <div className="status-item">
                                 <span className="status-label">{t('position')}</span>
                                 <span className="status-value mono">
                                     ({selectedRobot.pose?.x?.toFixed(2) || '0'}, {selectedRobot.pose?.y?.toFixed(2) || '0'})
+                                </span>
+                            </div>
+
+                            <div className="status-item" title="Total distance traveled in this session">
+                                <span className="status-label">Trip</span>
+                                <span className="status-value mono">
+                                    {selectedRobot.telemetry?.distance?.toFixed(2) || '0.00'} m
                                 </span>
                             </div>
 
@@ -252,6 +278,18 @@ const FleetStatusBar = () => {
                 </button>
 
                 <button
+                    className={`btn btn-secondary btn-sm ${getMonitorButtonClass()}`}
+                    onClick={() => setIsMonitorOpen(true)}
+                    title={`Open Serial Monitor (Telnet) - Status: ${monitorStatus}`}
+                >
+                    <span className="monitor-icon">🖥️</span>
+                    <span className="monitor-text">Monitor</span>
+                    {monitorStatus === 'connected' && <span className="status-dot pulsing-rec" title="Recording Logs" />}
+                    {monitorStatus === 'connecting' && <span className="status-dot connecting" />}
+                    {monitorStatus === 'error' && <span className="status-dot error" />}
+                </button>
+
+                <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => selectedRobotId && clearTraveledPathInStores(selectedRobotId)}
                     title={t('clear_path_desc')}
@@ -277,6 +315,12 @@ const FleetStatusBar = () => {
                     🔄
                 </button>
             </div>
+
+            {/* Telnet Monitor Modal */}
+            <SerialMonitorModal 
+                isOpen={isMonitorOpen} 
+                onClose={() => setIsMonitorOpen(false)} 
+            />
         </div>
     );
 };

@@ -5,7 +5,12 @@ yarn-debug.log*
 yarn-error.log*
 .env
 dist/
+dist-electron/
 build/
+out/
+bin/
+obj/
+release/
 
 # Python
 __pycache__/
@@ -20,6 +25,8 @@ __pycache__/
 .pio/
 .pioenvs/
 .piolibdeps/
+.pio/build/
+.pio/libdeps/
 
 # IDEs
 .vscode/*

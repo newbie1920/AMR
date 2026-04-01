@@ -229,7 +229,9 @@ class Costmap2D {
         // 3. Project each scan point into world coords → mark as obstacle
         for (let i = 0; i < scan.ranges.length; i++) {
             const r = scan.ranges[i];
-            if (r < scan.range_min || r > scan.range_max || !isFinite(r)) continue;
+            // Filter: Ignore points too close to the robot center (self-collisions) or out of sensor range.
+            // Some LiDARs pick up the robot's own chassis if not filtered.
+            if (r < this._robotRadius + 0.03 || r < scan.range_min || r > scan.range_max || !isFinite(r)) continue;
 
             const scanAngle = scan.angle_min + i * scan.angle_increment;
             const worldAngle = lyaw + scanAngle;

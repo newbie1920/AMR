@@ -27,6 +27,7 @@ class BehaviorManager {
         this._navController = navController;
         this._currentGoal = null;
         this._isRecovering = false;
+        this._recoveryAttempt = 0;
         this._isPaused = false;
         this._robots = []; // Internal fleet state to avoid require cycle
         this._onStateChange = null;
@@ -62,10 +63,15 @@ class BehaviorManager {
         this._sequencer.onComplete(cb);
     }
 
+    onMissionFailed(cb) {
+        this._sequencer.onFail(cb);
+    }
+
     pause() {
         if (this._isPaused) return;
         this._isPaused = true;
         this._isRecovering = false; // Reset recovery on pause
+        this._recoveryAttempt = 0;
         recovery.cancel(this._robotId); // Stop any active recovery movement
         
         this._notify(NAV_STATE.PAUSED);
@@ -95,6 +101,7 @@ class BehaviorManager {
     async navigateTo(goal) {
         this._currentGoal = goal;
         this._isRecovering = false;
+        this._recoveryAttempt = 0;
 
         // ─── Phase 11: Zone Reservation Check ───
         const requiredZone = this._identifyZoneFromGoal(goal);
@@ -128,6 +135,7 @@ class BehaviorManager {
         this._releaseAllLocks();
         this._currentGoal = null;
         this._isRecovering = false; // Interrupt recovery state
+        this._recoveryAttempt = 0;
         recovery.cancel(this._robotId); // Kill active recovery animations/intervals
         this._notify('IDLE');
         this._navController.cancel();
@@ -147,6 +155,7 @@ class BehaviorManager {
                 break;
 
             case NAV_STATE.GOAL_REACHED:
+                this._recoveryAttempt = 0;
                 this._notify('SUCCESS: Goal Reached');
                 this._currentGoal = null;
                 setTimeout(() => this._notify('IDLE'), 3000);
@@ -174,55 +183,58 @@ class BehaviorManager {
                 this._notify(`YIELDING to ${blockingRobot.name || blockingRobot.id}`);
                 await recovery.wait(2000); // Wait for them to pass
                 if (!this._isRecovering) return;
-                if (this._tryReplan()) {
-                    this._isRecovering = false;
-                    return;
-                }
+                
+                // Do not increment recovery attempt for yielding
+                this._finishRecoveryStep();
+                return;
             }
         }
 
-        // Phase 1: Spin
-        this._notify('RECOVERY: Spinning');
-        console.log(`[BehaviorManager:${this._robotId}] Recovery Phase 1: Spinning to clear obstacles...`);
-        await recovery.spin(this._robotId, Math.PI / 2);
-        if (!this._isRecovering) return;
-        await recovery.wait(1000);
-        if (!this._isRecovering) return;
-
-        if (this._tryReplan()) {
-            this._isRecovering = false;
-            return;
+        switch (this._recoveryAttempt) {
+            case 0:
+                this._notify('RECOVERY: Waiting');
+                console.log(`[BehaviorManager:${this._robotId}] Recovery Phase 0: Waiting 5s for clear path...`);
+                await recovery.wait(5000);
+                break;
+            case 1:
+                this._notify('RECOVERY: Spinning');
+                console.log(`[BehaviorManager:${this._robotId}] Recovery Phase 1: Spinning to clear obstacles...`);
+                await recovery.spin(this._robotId, Math.PI / 2);
+                await recovery.wait(1000);
+                break;
+            case 2:
+                this._notify('RECOVERY: Backing Up');
+                console.log(`[BehaviorManager:${this._robotId}] Recovery Phase 2: Backing up to gain clearance...`);
+                await recovery.backUp(this._robotId, 0.2);
+                await recovery.wait(1000);
+                break;
+            case 3:
+                this._notify('RECOVERY: Final Spin');
+                console.log(`[BehaviorManager:${this._robotId}] Recovery Phase 3: Final Spin...`);
+                await recovery.spin(this._robotId, Math.PI);
+                break;
+            default:
+                this._notify('ERROR: All Recoveries Failed');
+                console.error('[Behavior] All recovery behaviors exhausted. Mission failing.');
+                this._releaseAllLocks();
+                this._navController.cancel(); // Transition to CANCELLED/FAILED
+                this._isRecovering = false;
+                this._currentGoal = null;
+                this._recoveryAttempt = 0;
+                return;
         }
 
-        // Phase 2: BackUp
-        this._notify('RECOVERY: Backing Up');
-        console.log(`[BehaviorManager:${this._robotId}] Recovery Phase 2: Backing up to gain clearance...`);
-        await recovery.backUp(this._robotId, 0.2);
-        if (!this._isRecovering) return;
-        await recovery.wait(1000);
-        if (!this._isRecovering) return;
+        if (!this._isRecovering) return; // If cancelled during wait
 
-        if (this._tryReplan()) {
-            this._isRecovering = false;
-            return;
-        }
+        this._recoveryAttempt++;
+        this._finishRecoveryStep();
+    }
 
-        // Phase 3: Spin more
-        this._notify('RECOVERY: Final Spin');
-        await recovery.spin(this._robotId, Math.PI);
-        if (!this._isRecovering) return;
-
-        if (this._tryReplan()) {
-            this._isRecovering = false;
-            return;
-        }
-
-        this._notify('ERROR: All Recoveries Failed');
-        console.error('[Behavior] All recovery behaviors exhausted. Mission failing.');
-        this._releaseAllLocks();
-        this._navController.cancel(); // Transition to CANCELLED/FAILED
+    _finishRecoveryStep() {
         this._isRecovering = false;
-        this._currentGoal = null;
+        if (this._currentGoal && !this._isPaused) {
+            this._navController.setGoal(this._currentGoal);
+        }
     }
 
     _releaseAllLocks() {
@@ -245,11 +257,7 @@ class BehaviorManager {
         return null;
     }
 
-    _tryReplan() {
-        if (!this._currentGoal) return false;
-        this._navController.setGoal(this._currentGoal);
-        return this._navController.getState() !== NAV_STATE.FAILED;
-    }
+    // _tryReplan removed as it was causing infinite dummy loops
 
     /**
      * _getBlockingRobot()

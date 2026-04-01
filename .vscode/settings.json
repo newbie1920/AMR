@@ -4,5 +4,6 @@
     "platformio-ide.customPATH": "C:\\Users\\msi center\\.platformio\\penv\\Scripts",
     "platformio-ide.useBuiltinPIOCore": true,
     "snyk.advanced.organization": "be648168-7bc0-4aa7-a4c9-1634da1232f3",
-    "snyk.advanced.autoSelectOrganization": true
+    "snyk.advanced.autoSelectOrganization": true,
+    "chatgpt.openOnStartup": false
 }

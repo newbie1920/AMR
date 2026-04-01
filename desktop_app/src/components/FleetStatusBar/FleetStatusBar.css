@@ -239,3 +239,60 @@
     background: var(--color-border);
     margin: 0 var(--spacing-xs);
 }
+
+/* Monitor Button Styles */
+.btn-monitor {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-right: 24px !important;
+}
+
+.btn-monitor.connected {
+    border-color: var(--color-success) !important;
+    background: rgba(16, 185, 129, 0.1) !important;
+}
+
+.btn-monitor.connecting {
+    border-color: var(--color-accent-primary) !important;
+    opacity: 0.8;
+}
+
+.btn-monitor.error {
+    border-color: var(--color-error) !important;
+    background: rgba(239, 68, 68, 0.1) !important;
+}
+
+.status-dot {
+    position: absolute;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-dot.pulsing-rec {
+    background: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+    animation: pulse-red 1s infinite alternate;
+}
+
+.status-dot.connecting {
+    background: var(--color-accent-primary);
+    animation: pulse-blue 1s infinite alternate;
+}
+
+.status-dot.error {
+    background: #666;
+}
+
+@keyframes pulse-red {
+    from { opacity: 0.4; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes pulse-blue {
+    from { opacity: 0.4; }
+    to { opacity: 1; }
+}

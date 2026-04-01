@@ -28,7 +28,7 @@ const StatusBar = () => {
         latencyMs,
         activeBehavior,
         status,
-        batteryLevel
+        battery
     } = robot;
 
     // ... rest of the component
@@ -80,7 +80,12 @@ const StatusBar = () => {
 
                 <div className="status-item">
                     <span className="status-label">{t('behavior')}:</span>
-                    <span className="status-value behavior-tag">{t(activeBehavior) || activeBehavior}</span>
+                    <span className="status-value behavior-tag">
+                        { (activeBehavior && typeof activeBehavior === 'object') 
+                            ? (activeBehavior.name || 'Idle') 
+                            : (activeBehavior ? (t(activeBehavior.toLowerCase()) || activeBehavior) : 'N/A')
+                        }
+                    </span>
                 </div>
 
                 <div className="status-divider"></div>
@@ -106,8 +111,8 @@ const StatusBar = () => {
                     <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1.172a2 2 0 01-1.414-.586l-.828-.828A2 2 0 0011.172 2H8.828a2 2 0 00-1.414.586l-.828.828A2 2 0 015.172 4H4z" />
                     </svg>
-                    <span className={`battery-level ${batteryLevel < 20 ? 'low' : ''}`}>
-                        {batteryLevel}%
+                    <span className={`battery-level ${battery < 20 ? 'low' : ''}`}>
+                        {battery}%
                     </span>
                 </div>
             </div>

@@ -86,6 +86,8 @@ const useFleetStore = create(
                         lidar: false,
                         imu: false
                     },
+                    brakeEnabled: false,
+                    ledEnabled: false,
                     odometrySource: 'encoder' // 'encoder' | 'imu' | 'fusion' | 'all'
                 };
 
@@ -203,8 +205,15 @@ const useFleetStore = create(
                 const robot = get().robots.find(r => r.id === robotId);
                 if (!robot) return;
 
-                // Update local state
                 get().updateRobot(robotId, { odometrySource: source });
+
+                import('./robotStore').then(module => {
+                    const rStore = module.useRobotStore;
+                    const nc = rStore?.getState?.().getNavController?.(robotId);
+                    if (nc?.setOdometrySource) {
+                        nc.setOdometrySource(source);
+                    }
+                }).catch(() => { });
 
                 // Send to robot if connected
                 if (robot.connected) {
@@ -213,6 +222,40 @@ const useFleetStore = create(
                         source: source
                     });
                     console.log(`[${robot.name}] Odometry source set to: ${source}`);
+                }
+            },
+
+            toggleBrake: (robotId) => {
+                const robot = get().robots.find(r => r.id === robotId);
+                if (!robot) return;
+                
+                const newValue = !robot.brakeEnabled;
+                get().updateRobot(robotId, { brakeEnabled: newValue });
+                
+                if (robot.connected) {
+                    import('../lib/robotBridge').then(m => {
+                        m.default.sendMessage(robotId, {
+                            cmd: 'brake',
+                            val: newValue
+                        });
+                    }).catch(() => {});
+                }
+            },
+
+            toggleLed: (robotId) => {
+                const robot = get().robots.find(r => r.id === robotId);
+                if (!robot) return;
+                
+                const newValue = !robot.ledEnabled;
+                get().updateRobot(robotId, { ledEnabled: newValue });
+                
+                if (robot.connected) {
+                    import('../lib/robotBridge').then(m => {
+                        m.default.sendMessage(robotId, {
+                            cmd: 'led',
+                            val: newValue
+                        });
+                    }).catch(() => {});
                 }
             },
 

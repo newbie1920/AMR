@@ -168,18 +168,19 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
         const rotLerp = 1 - Math.exp(-3 * delta);
 
         current.x = THREE.MathUtils.lerp(current.x, pose.x, posLerp);
-        current.x = THREE.MathUtils.lerp(current.x, pose.x, posLerp);
         current.z = THREE.MathUtils.lerp(current.z, -pose.y, posLerp); // Map Left to -Z
-
+        
         // Rotate robot to face direction (pose.theta is in radians)
         if (groupRef.current && !isNaN(pose.theta)) {
-            // Synchronize rotation with coordinate mapping (-pose.y -> -pose.theta)
-            const targetRotation = -pose.theta;
-            groupRef.current.rotation.y = THREE.MathUtils.lerp(
-                groupRef.current.rotation.y,
-                targetRotation,
-                rotLerp
-            );
+            const targetRotation = pose.theta;
+            
+            // Handle angle wrap-around for smooth rotation
+            let deltaTheta = targetRotation - groupRef.current.rotation.y;
+            while (deltaTheta > Math.PI) deltaTheta -= 2 * Math.PI;
+            while (deltaTheta < -Math.PI) deltaTheta += 2 * Math.PI;
+            
+            const fastRotFactor = 1 - Math.exp(-25 * delta);
+            groupRef.current.rotation.y += deltaTheta * fastRotFactor;
         }
 
         // Animate wheels using ENCODER TICKS (absolute rotation, no drift)
@@ -228,7 +229,7 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
     return (
         <group
             ref={groupRef}
-            position={[initialPos.x, useURDF ? 0 : (BODY_HEIGHT / 2 + WHEEL_RADIUS), initialPos.y]}
+            position={[initialPos.x, useURDF ? 0 : (BODY_HEIGHT / 2 + WHEEL_RADIUS), -initialPos.y]}
             onClick={(e) => {
                 e.stopPropagation();
                 onClick?.();
@@ -252,6 +253,7 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
                 position={[0, BODY_HEIGHT + 0.3, 0]}
                 center
                 distanceFactor={8}
+                zIndexRange={[100, 0]}
                 style={{
                     color: '#fff',
                     background: 'rgba(0,0,0,0.6)',
@@ -260,7 +262,8 @@ const Robot3D = ({ robot, isSelected, onClick, hideInFirstPerson = false, urdfXm
                     fontSize: '10px',
                     whiteSpace: 'nowrap',
                     pointerEvents: 'none',
-                    borderLeft: `3px solid ${robot.connected ? (robot.color || '#00d4ff') : '#666'}`
+                    borderLeft: `3px solid ${robot.connected ? (robot.color || '#00d4ff') : '#666'}`,
+                    zIndex: 1
                 }}
             >
                 {robot.name || 'AMR'}

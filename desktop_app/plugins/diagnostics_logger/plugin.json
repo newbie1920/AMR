@@ -1,0 +1,12 @@
+{
+    "name": "diagnostics_logger",
+    "version": "1.0.0",
+    "description": "Logs robot diagnostics (speed, scan quality) and publishes health reports via EventBus.",
+    "author": "AMR System",
+    "dependencies": [],
+    "topics": {
+        "subscribe": ["/odom", "/scan"],
+        "publish": ["/diagnostics"],
+        "services": ["/diagnostics/report"]
+    }
+}

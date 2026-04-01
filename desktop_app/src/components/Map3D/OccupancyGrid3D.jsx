@@ -68,7 +68,7 @@ const OccupancyGrid3D = ({ grid, opacity = 1.0, color = "#ffffff", yOffset = 0.0
             position={[
                 origin.x + worldWidth / 2,
                 yOffset,
-                origin.y + worldHeight / 2
+                -(origin.y + worldHeight / 2)
             ]}
             ref={meshRef}
         >

@@ -5,6 +5,9 @@ import BehaviorManager from '../lib/behaviorManager';
 import NavController, { NAV_STATE } from '../lib/navController';
 import paramServer from '../lib/paramServer';
 import syncService from '../lib/syncService';
+import sensorFusion from '../lib/sensorFusion/sensorFusion';
+import eventBus from '../lib/eventBus';
+import pluginManager from '../lib/pluginManager';
 import { useFleetStore } from './fleetStore';
 
 const initialRobotState = {
@@ -18,12 +21,16 @@ const initialRobotState = {
     telemetry: { distance: 0, heading: 0, acceleration: 0 },
     traveledPath: [],
     lidarData: [],
-    activeBehavior: { name: 'Idle', progress: 0, status: 'ready' },
+    activeBehavior: 'IDLE',
     isNavigating: false,
     navigationStatus: 'idle',
     targetPose: null,
     currentPath: [],
-    tfTree: null
+    targetPose: null,
+    currentPath: [],
+    tfTree: null,
+    filteredOdom: null, // { x, y, theta, v, omega } from EKF sensor fusion
+    monitorStatus: 'disconnected', // 'connecting', 'connected', 'error', 'disconnected'
 };
 
 /**
@@ -35,6 +42,23 @@ const useRobotStore = create((set, get) => {
     const navControllers = new Map();
     const behaviorManagers = new Map();
     const subscriptions = new Map();
+
+    // Initialize IPC listeners for monitor status
+    if (window.electronAPI && window.electronAPI.onMonitorStatus) {
+        window.electronAPI.onMonitorStatus((data) => {
+            console.log(`[Store] Monitor Status Update:`, data);
+            set(state => {
+                const robots = { ...state.robots };
+                if (data.robotId && robots[data.robotId]) {
+                    robots[data.robotId].monitorStatus = data.status;
+                } else if (state.selectedRobotId && robots[state.selectedRobotId]) {
+                    // Fallback to selected robot if no ID provided in event
+                    robots[state.selectedRobotId].monitorStatus = data.status;
+                }
+                return { robots };
+            });
+        });
+    }
 
     return {
         robots: {},
@@ -78,13 +102,15 @@ const useRobotStore = create((set, get) => {
                 // NOTE: Firmware sends negated values (see main.cpp "NEGATE for App").
                 // Theta and velocity keep firmware convention (Robot3D uses -pose.theta to handle it).
                 // Only position X,Y are corrected here so the 3D map shows correct direction.
+                // HEADING FIX: Negate firmware theta.
                 const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
+                // VELOCITY FIX: Standard velocity convention
                 const v = msg.v !== undefined ? msg.v : (msg.vx || 0);
                 const w = msg.w !== undefined ? msg.w : (msg.wz || 0);
-
-                // POSITION FIX: Negate x,y back to true values for correct 3D direction
-                const posX = msg.x !== undefined ? -msg.x : (robot.pose?.x ?? 0);
-                const posY = msg.y !== undefined ? -msg.y : (robot.pose?.y ?? 0);
+                
+                // POSITION FIX: Standard X,Y coordinates
+                const posX = msg.x !== undefined ? msg.x : (robot.pose?.x ?? 0);
+                const posY = msg.y !== undefined ? msg.y : (robot.pose?.y ?? 0);
 
                 const traveledPath = robot.traveledPath || [];
                 // Only add point if moved significantly (> 2cm)
@@ -101,20 +127,29 @@ const useRobotStore = create((set, get) => {
                     velocity: { linear: v, angular: w },
                     battery: msg.batt || 0,
                     telemetry: {
+                        battery: msg.batt || 0,
                         distance: msg.d || 0,
                         heading: msg.h || 0,
                         acceleration: msg.a || 0,
                         // DISPLAY FIX: Negate PID velocities so they show positive for forward
-                        vL_t: msg.vL_t != null ? -msg.vL_t : undefined,
-                        vL_r: msg.vL_r != null ? -msg.vL_r : undefined,
-                        vR_t: msg.vR_t != null ? -msg.vR_t : undefined,
-                        vR_r: msg.vR_r != null ? -msg.vR_r : undefined,
+                        vL_t: msg.vL_t,
+                        vL_r: msg.vL_r,
+                        vR_t: msg.vR_t,
+                        vR_r: msg.vR_r,
                         pwmL: msg.pwmL, pwmR: msg.pwmR,
-                        // DISPLAY FIX: Negate encoder ticks so they show positive for forward
+                        // TICKS: Use raw values
                         ticks: msg.enc ? {
-                            left: -msg.enc.l,
-                            right: -msg.enc.r
-                        } : { left: 0, right: 0 }
+                            left: msg.enc.l,
+                            right: msg.enc.r
+                        } : { left: 0, right: 0 },
+                        imu: typeof msg.imu === 'object'
+                            ? msg.imu
+                            : {
+                                enabled: !!msg.imu,
+                                calibrated: !!msg.imu_cal,
+                                gyroZ: msg.gyroZ ?? 0,
+                                fusedHeadingDeg: msg.fTheta ?? msg.h ?? 0,
+                            }
                     },
                     traveledPath: newPath.slice(-500)
                 };
@@ -199,15 +234,82 @@ const useRobotStore = create((set, get) => {
                             goalTolerance: c.dwa_goalTolerance ?? 0.15,
                             simTime: c.dwa_simTime ?? 1.5,
                         });
+                        navController.setOdometrySource(fleetRobot.odometrySource || 'encoder');
                         // Motor params → firmware
                         robotBridge.sendConfig(robotId, {
                             ff_gain: parseFloat(c.ff_gain ?? 20.0),
                             min_pwm: parseInt(c.min_pwm ?? 50),
                             cmd_timeout: parseInt(c.cmd_timeout ?? 500),
                         });
+
+                        // ─── Initialize Sensor Fusion (EKF Web Worker) ───
+                        sensorFusion.init(robotId, {
+                            wheelRadius: parseFloat(c.wheel_radius ?? 0.033),
+                            wheelSeparation: parseFloat(c.wheel_separation ?? 0.17),
+                            ticksPerRev: parseInt(c.ticks_per_rev ?? 1665),
+                        });
+                    } else {
+                        // Default sensor fusion config
+                        sensorFusion.init(robotId);
+                    }
+
+                    // Subscribe to filtered odom updates
+                    sensorFusion.onFiltered((odom) => {
+                        const fleetRobotCurrent = useFleetStore.getState().robots.find(r => r.id === robotId);
+                        const odometrySource = fleetRobotCurrent?.odometrySource || 'encoder';
+                        const useFusedPose = odometrySource === 'fusion' || odometrySource === 'imu' || odometrySource === 'all';
+                        const fusedPose = {
+                            x: odom.x,
+                            y: odom.y,
+                            theta: odom.theta,
+                        };
+                        const fusedVelocity = {
+                            linear: odom.v,
+                            angular: odom.omega,
+                        };
+
+                        if (useFusedPose) {
+                            navController.applyExternalOdometry(odom);
+                            useFleetStore.getState().updateRobot(robotId, {
+                                pose: fusedPose,
+                                velocity: fusedVelocity,
+                            });
+                        }
+
+                        set(stateStore => ({
+                            robots: {
+                                ...stateStore.robots,
+                                [robotId]: {
+                                    ...stateStore.robots[robotId],
+                                    ...(useFusedPose ? {
+                                        pose: fusedPose,
+                                        velocity: fusedVelocity,
+                                    } : {}),
+                                    filteredOdom: {
+                                        x: odom.x,
+                                        y: odom.y,
+                                        theta: odom.theta,
+                                        v: odom.v,
+                                        omega: odom.omega,
+                                    }
+                                }
+                            }
+                        }));
+                    }, robotId);
+
+                    if (!pluginManager._eventBus) {
+                        pluginManager.init(eventBus);
+                    }
+
+                    // ─── AUTO-START TELNET MONITOR ───
+                    if (window.electronAPI && window.electronAPI.startMonitor) {
+                        const ip = robotBridge.getRobotIP(robotId);
+                        window.electronAPI.startMonitor({ ip, robotId });
+                        console.log(`[RobotStore] Auto-started Telnet monitor for ${robotId} at ${ip}:23`);
                     }
                 } else if (state === 'disconnected') {
                     navController.stop();
+                    sensorFusion.destroy(robotId);
                 }
             }));
 
@@ -258,6 +360,7 @@ const useRobotStore = create((set, get) => {
             navControllers.delete(robotId);
             behaviorManagers.get(robotId)?.cancel();
             behaviorManagers.delete(robotId);
+            sensorFusion.destroy(robotId);
 
             set(state => {
                 const newRobots = { ...state.robots };
@@ -279,6 +382,9 @@ const useRobotStore = create((set, get) => {
         },
 
         sendVelocity: (robotId, linear, angular) => {
+            if (window.electronAPI && window.electronAPI.logAppEvent) {
+                window.electronAPI.logAppEvent(`CMD_VEL: v=${linear.toFixed(2)}, w=${angular.toFixed(2)}`);
+            }
             robotBridge.cmdVel(robotId, linear, angular);
         },
 

@@ -301,28 +301,53 @@ const WarehouseMap = () => {
 
     }, [robots, selectedRobotId, scale, offset, showGrid, showPath, worldToCanvas, t]);
 
-    // Resize canvas
+    // Resize canvas – sync ngay lập tức và theo dõi mọi thay đổi kích thước
     useEffect(() => {
-        const handleResize = () => {
-            const canvas = canvasRef.current;
-            const container = containerRef.current;
-            if (!canvas || !container) return;
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        if (!canvas || !container) return;
 
-            canvas.width = container.clientWidth;
-            canvas.height = container.clientHeight;
-            drawMap();
+        // Sync ngay khi effect chạy (trước animation frame đầu tiên)
+        const syncSize = () => {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+                canvas.width = w;
+                canvas.height = h;
+            }
         };
 
-        handleResize();
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, [drawMap]);
+        syncSize();
 
-    // Animation loop
+        const observer = new ResizeObserver(() => syncSize());
+        observer.observe(container);
+
+        const onWindowResize = () => syncSize();
+        window.addEventListener('resize', onWindowResize);
+
+        return () => {
+            observer.disconnect();
+            window.removeEventListener('resize', onWindowResize);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // chỉ chạy 1 lần lúc mount – syncSize không cần drawMap trong deps
+
+    // Animation loop – tự sync kích thước canvas trước mỗi frame
     useEffect(() => {
         let animationId;
 
         const animate = () => {
+            // Luôn sync canvas size với container trước khi vẽ
+            const canvas = canvasRef.current;
+            const container = containerRef.current;
+            if (canvas && container) {
+                const w = container.clientWidth;
+                const h = container.clientHeight;
+                if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+                    canvas.width = w;
+                    canvas.height = h;
+                }
+            }
             drawMap();
             animationId = requestAnimationFrame(animate);
         };

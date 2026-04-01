@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import WaypointMapView from './WaypointMapView';
 import { useFleetStore } from '../../stores/fleetStore';
+import { useMapStore } from '../../stores/mapStore';
 import translations from '../../translations';
 
 const CreateTaskModal = ({
@@ -108,6 +109,19 @@ const CreateTaskModal = ({
     const handleCreate = () => {
         if (taskData.waypoints.length < 1) {
             alert(t('at_least_one_point'));
+            return;
+        }
+
+        // Check if any waypoint is out of bounds
+        const mapStore = useMapStore.getState();
+        const outOfBoundsWaypoints = taskData.waypoints.filter(wp => !mapStore.isWithinBounds(wp.x, wp.y));
+        
+        if (outOfBoundsWaypoints.length > 0) {
+            const msg = `⚠️ Phát hiện ${outOfBoundsWaypoints.length} điểm nằm ngoài bản đồ!\n\n` +
+                `Kích thước bản đồ: ${mapStore.width}×${mapStore.height}m\n\n` +
+                `Các điểm ngoài phạm vi:\n` +
+                outOfBoundsWaypoints.map((wp, i) => `  ${i + 1}. (${wp.x.toFixed(1)}, ${wp.y.toFixed(1)})`).join('\n');
+            alert(msg);
             return;
         }
 

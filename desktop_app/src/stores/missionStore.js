@@ -286,6 +286,32 @@ export const createMission = (name, waypoints, targetTime = null) => ({
     scheduledAt: null, // Timestamp for scheduled start
 });
 
+const deriveWaypointTheta = (current, next, fallbackTheta = 0) => {
+    if (typeof current?.theta === 'number' && Number.isFinite(current.theta)) {
+        const theta = current.theta;
+        const looksLikeDegrees = current?.thetaEnabled || Math.abs(theta) > (Math.PI * 2 + 0.001);
+        return looksLikeDegrees ? (theta * Math.PI / 180) : theta;
+    }
+
+    if (next && Number.isFinite(next.x) && Number.isFinite(next.y)) {
+        const dx = next.x - current.x;
+        const dy = next.y - current.y;
+        if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) {
+            return Math.atan2(dy, dx);
+        }
+    }
+
+    return fallbackTheta;
+};
+
+const normalizeMissionWaypoints = (waypoints, fallbackTheta = 0) => {
+    return (waypoints || []).map((wp, index, arr) => ({
+        ...wp,
+        task: wp.task ?? wp.action ?? null,
+        theta: deriveWaypointTheta(wp, arr[index + 1], fallbackTheta),
+    }));
+};
+
 export const useMissionStore = create(
     persist(
         (set, get) => ({
@@ -296,7 +322,23 @@ export const useMissionStore = create(
 
             // Toggle assignment paused state
             toggleAssignmentPaused: () => {
-                set(state => ({ isAssignmentPaused: !state.isAssignmentPaused }));
+                const current = get().isAssignmentPaused;
+                const next = !current;
+                set({ isAssignmentPaused: next });
+                
+                console.log(`[MissionStore] Assignment ${next ? 'PAUSED' : 'RESUMED'}`);
+
+                // Pause/Resume all active missions
+                const activeMissions = get().missions.filter(m => m.status === 'active');
+                activeMissions.forEach(m => {
+                    if (m.assignedRobotId) {
+                        if (next) { // Next state is PAUSED
+                            useRobotStore.getState().pauseMission(m.assignedRobotId);
+                        } else { // Next state is RESUMED
+                            useRobotStore.getState().resumeMission(m.assignedRobotId);
+                        }
+                    }
+                });
             },
 
             // Add a new mission
@@ -333,6 +375,19 @@ export const useMissionStore = create(
                 const pathPlanner = get().pathPlanner;
 
                 if (!mission || !robot) return false;
+
+                // Check if all waypoints are within map bounds
+                const bounds = mapStore.getBounds();
+                const outOfBoundsWaypoints = mission.waypoints.filter(wp => !mapStore.isWithinBounds(wp.x, wp.y));
+                
+                if (outOfBoundsWaypoints.length > 0) {
+                    const msg = `⚠️ Phát hiện ${outOfBoundsWaypoints.length} điểm nằm ngoài bản đồ (${bounds.width}×${bounds.height}m):\n` +
+                        outOfBoundsWaypoints.map((wp, i) => `  • (${wp.x.toFixed(1)}, ${wp.y.toFixed(1)})`).join('\n') +
+                        `\n\nHãy chỉnh sửa many ụm vụ trước khi giao.`;
+                    alert(msg);
+                    console.warn('Mission has out-of-bounds waypoints:', outOfBoundsWaypoints);
+                    return false;
+                }
 
                 // Calculate required grid size based on robot pose and all waypoints
                 const waypointsMax = mission.waypoints.reduce((acc, w) =>
@@ -454,53 +509,82 @@ export const useMissionStore = create(
 
             // Start assigned mission
             startMission: async (missionId) => {
+                if (get().isAssignmentPaused) {
+                    alert('Hệ thống đang tạm dừng! Vui lòng nhấn Tiếp tục để bắt đầu nhiệm vụ.');
+                    return false;
+                }
                 const mission = get().missions.find(m => m.id === missionId);
                 console.log(`[MissionStore] startMission trigger cho: ${missionId}`, mission);
 
-                if (mission?.assignedRobotId) {
-                    let robotStore = useRobotStore.getState();
-                    let bm = robotStore.getBehaviorManager(mission.assignedRobotId);
-
-                    // Retry logic: if BM not found, wait a bit and try again (handles connection lag)
-                    if (!bm) {
-                        console.log(`[MissionStore] BehaviorManager missing, retrying in 500ms...`);
-                        await new Promise(r => setTimeout(r, 500));
-                        robotStore = useRobotStore.getState();
-                        bm = robotStore.getBehaviorManager(mission.assignedRobotId);
-                    }
-
-                    console.log(`[MissionStore] Lấy BehaviorManager cho robot ${mission.assignedRobotId}:`, !!bm);
-
-                    if (bm) {
-                        bm.onMissionProgress((index) => {
-                            get().updateMission(missionId, { currentWaypointIndex: index });
-                        });
-                        bm.onMissionComplete(() => {
-                            get().updateMission(missionId, {
-                                status: 'completed',
-                                completedAt: Date.now()
-                            });
-                        });
-                        console.log(`[MissionStore] Calling bm.startMission với ${mission.waypoints.length} waypoints`, mission.waypoints);
-                        try {
-                            bm.startMission(mission.waypoints);
-                        } catch (e) {
-                            console.error(`[MissionStore] Lỗi khi gọi bm.startMission`, e);
-                        }
-                    } else {
-                        console.warn(`[MissionStore] KHÔNG THỂ TÌM THẤY BehaviorManager cho robot: ${mission.assignedRobotId}`);
-                    }
-                } else {
+                if (!mission?.assignedRobotId) {
                     console.warn(`[MissionStore] Mission không được gán robotId`);
+                    return false;
+                }
+
+                let robotStore = useRobotStore.getState();
+                let bm = robotStore.getBehaviorManager(mission.assignedRobotId);
+                let liveRobot = robotStore.robots?.[mission.assignedRobotId];
+
+                // Retry logic: if BM not found yet, wait a bit and try again (handles connection lag)
+                if (!bm || !liveRobot?.connected) {
+                    console.log(`[MissionStore] Behavior backend chưa sẵn sàng, retrying in 500ms...`);
+                    await new Promise(r => setTimeout(r, 500));
+                    robotStore = useRobotStore.getState();
+                    bm = robotStore.getBehaviorManager(mission.assignedRobotId);
+                    liveRobot = robotStore.robots?.[mission.assignedRobotId];
+                }
+
+                console.log(`[MissionStore] Lấy BehaviorManager cho robot ${mission.assignedRobotId}:`, !!bm);
+
+                if (!liveRobot?.connected) {
+                    console.warn(`[MissionStore] Robot ${mission.assignedRobotId} chưa connected trong robotStore, hủy startMission.`);
+                    alert('Robot chưa kết nối thực sự tới bộ điều khiển điều hướng. Hãy kết nối lại robot rồi nhấn Bắt đầu lần nữa.');
+                    return false;
+                }
+
+                if (!bm) {
+                    console.warn(`[MissionStore] KHÔNG THỂ TÌM THẤY BehaviorManager cho robot: ${mission.assignedRobotId}`);
+                    alert('Không tìm thấy bộ điều khiển nhiệm vụ của robot. Hãy reconnect robot rồi thử lại.');
+                    return false;
+                }
+
+                const startPoseTheta = liveRobot.pose?.theta ?? 0;
+                const normalizedWaypoints = normalizeMissionWaypoints(mission.waypoints, startPoseTheta);
+
+                bm.onMissionProgress((index) => {
+                    get().updateMission(missionId, { currentWaypointIndex: index });
+                });
+                bm.onMissionComplete(() => {
+                    get().updateMission(missionId, {
+                        status: 'completed',
+                        completedAt: Date.now()
+                    });
+                });
+
+                console.log(`[MissionStore] Calling bm.startMission với ${normalizedWaypoints.length} waypoints`, normalizedWaypoints);
+                try {
+                    bm.startMission(normalizedWaypoints);
+                } catch (e) {
+                    console.error(`[MissionStore] Lỗi khi gọi bm.startMission`, e);
+                    alert('Không thể bắt đầu nhiệm vụ. Kiểm tra log điều hướng và thử reconnect robot.');
+                    return false;
                 }
 
                 set(state => ({
                     missions: state.missions.map(m =>
                         m.id === missionId
-                            ? { ...m, status: 'active', startedAt: m.startedAt || Date.now(), updatedAt: Date.now() }
+                            ? {
+                                ...m,
+                                status: 'active',
+                                startedAt: m.startedAt || Date.now(),
+                                updatedAt: Date.now(),
+                                waypoints: normalizedWaypoints
+                            }
                             : m
                     )
                 }));
+
+                return true;
             },
 
             // Stop/Pause active mission
@@ -584,6 +668,23 @@ export const useMissionStore = create(
                 }));
             },
 
+            // Reset a failed/canceled mission
+            resetMission: (missionId) => {
+                set(state => ({
+                    missions: state.missions.map(m => {
+                        if (m.id !== missionId) return m;
+                        return {
+                            ...m,
+                            status: m.assignedRobotId ? 'assigned' : 'pending',
+                            currentWaypointIndex: 0,
+                            startedAt: null,
+                            completedAt: null,
+                            updatedAt: Date.now()
+                        };
+                    })
+                }));
+            },
+
             // Remove mission
             removeMission: (missionId) => {
                 set(state => ({
@@ -618,6 +719,8 @@ export const useMissionStore = create(
 
             // Mission Control Loop - Drives robots to their targets with collision avoidance
             runMissionControl: (robots, sendVelocity) => {
+                if (get().isAssignmentPaused) return;
+
                 const now = Date.now();
                 const activeMissions = get().missions.filter(m =>
                     m.status === 'active' && (!m.scheduledAt || m.scheduledAt <= now)

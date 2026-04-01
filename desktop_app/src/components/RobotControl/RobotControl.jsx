@@ -13,6 +13,7 @@ const RobotControl = () => {
         stopRobot,
         updateRobot,
         toggleSensor,
+        toggleLed,
         settings,
         updateSettings,
         clearMap,
@@ -151,6 +152,14 @@ const RobotControl = () => {
                         title={t('robot_odom_reset')}
                     >
                         🔄
+                    </button>
+                    <button
+                        className={`btn btn-icon btn-ghost btn-sm ${selectedRobot.ledEnabled ? 'active' : ''}`}
+                        onClick={() => toggleLed(selectedRobotId)}
+                        title={t('toggle_led')}
+                        style={{ color: selectedRobot.ledEnabled ? '#ffdd00' : 'inherit', fontSize: '1.2rem' }}
+                    >
+                        {selectedRobot.ledEnabled ? '💡' : '🌑'}
                     </button>
                     <div className={`connection-status-badge ${selectedRobot.connected ? 'online' : 'offline'}`}>
                         <span className="pulse-dot"></span>

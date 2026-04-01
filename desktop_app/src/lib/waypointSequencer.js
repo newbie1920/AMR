@@ -34,6 +34,7 @@ export class WaypointSequencer {
         this._onTaskCallback = null;
         this._onProgressCallback = null;
         this._onCompleteCallback = null;
+        this._onFailCallback = null;
 
         // Listen to navigation state
         this._navController.onState(({ state }) => {
@@ -53,6 +54,7 @@ export class WaypointSequencer {
     onProgress(cb) { this._onProgressCallback = cb; }
     onComplete(cb) { this._onCompleteCallback = cb; }
     onTask(cb) { this._onTaskCallback = cb; }
+    onFail(cb) { this._onFailCallback = cb; }
 
     /**
      * startMission(waypoints)
@@ -119,6 +121,7 @@ export class WaypointSequencer {
             console.log(`[Waypoints] Mission stopped by user.`);
         } else {
             console.error(`[Waypoints] Mission failed at waypoint ${this._currentIndex + 1} due to state: ${state}`);
+            if (this._onFailCallback) this._onFailCallback(state);
         }
         this._isMissionActive = false;
     }

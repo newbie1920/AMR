@@ -31,9 +31,9 @@ const CONFIG = {
     planHz: 2,
     goalTolerance: 0.15,
     yawTolerance: 0.1,
-    stuckMinMove: 0.015, // Threshold for movement (meters)
-    stuckMinTurn: 0.05,  // Threshold for rotation (radians)
-    stuckTimeoutSec: 15, // Give it more time before triggering recovery
+    stuckMinMove: 0.01, // Threshold for movement (meters)
+    stuckMinTurn: 0.02,  // Threshold for rotation (radians)
+    stuckTimeoutSec: 30, // Increased to 30s to be less sensitive
     costmapRolling: false // Disabled: Rolling window causes instability in simulation without lidar
 };
 
@@ -63,8 +63,27 @@ class NavController {
         this.hectorSlam = new HectorSlam();
         this.costmap = new Costmap2D(this.tf);
         this.lidarDriver = new LidarDriver();
-        this.globalPlanner = new GlobalPlanner();
-        this.dwaPlanner = new DWAPlanner();
+        this.globalPlanner = new GlobalPlanner(); // Fallback
+        this.dwaPlanner = new DWAPlanner(); // Fallback
+
+        // ─── Web Workers ───
+        this._plannerWorker = null;
+        this._navWorker = null;
+        this._isGlobalPlanning = false;
+        this._isLocalPlanning = false;
+        this._pendingLocalPlan = null;
+
+        try {
+            this._plannerWorker = new Worker(new URL('./workers/plannerWorker.js', import.meta.url), { type: 'module' });
+            this._plannerWorker.onmessage = this._handlePlannerWorkerMsg.bind(this);
+
+            this._navWorker = new Worker(new URL('./workers/navWorker.js', import.meta.url), { type: 'module' });
+            this._navWorker.onmessage = this._handleNavWorkerMsg.bind(this);
+            // Sync initial params
+            this._navWorker.postMessage({ type: 'config', params: this.dwaPlanner.getParams() });
+        } catch (e) {
+            console.warn('[NavController] Failed to initialize Web Workers, falling back to main thread.', e);
+        }
 
         this._listeners = [];
         this._cmdTimer = null;
@@ -77,6 +96,7 @@ class NavController {
         this._lastStuckPose = null; // For new stuck detection logic
 
         this._initialized = false;
+        this._odometrySource = 'encoder';
     }
 
     init() {
@@ -85,46 +105,33 @@ class NavController {
 
         // Nhận telemetry từ robot (pose update)
         robotBridge.subscribe(this._robotId, MSG.TELEM, (msg) => {
-            // Mapping keys to match firmware (main.cpp)
-            import('../stores/fleetStore').then(module => {
-                const robot = module.useFleetStore.getState().robots.find(r => r.id === this._robotId);
-                const rotCorr = robot?.config?.rotationCorrection || 1.0;
-                
-                const theta = msg.h !== undefined ? (msg.h * Math.PI / 180 * rotCorr) : (msg.theta ?? this._robotPose.theta);
-                const x = msg.x !== undefined ? msg.x : (this._robotPose.x ?? 0);
-                const y = msg.y !== undefined ? msg.y : (this._robotPose.y ?? 0);
-
-                this._robotPose = { x, y, theta };
-                
-                // VELOCITY SIGN FIX: Positions are double-negated (firmware negates, we negate again)
-                // to get true world coordinates. Velocities MUST also be negated to match.
-                // Without this, DWA thinks +v = forward but firmware interprets +v as backward.
-                const linear = msg.v !== undefined ? msg.v : (msg.vx ?? 0);
+            if (this._odometrySource === 'fusion' || this._odometrySource === 'imu' || this._odometrySource === 'all') {
+                // When fusion/IMU odometry is selected, pose updates come from applyExternalOdometry().
+                // Keep raw velocity as a fallback for the planner, but do not overwrite heading/pose here.
+                const linear = msg.v !== undefined ? msg.v : (msg.vx || 0);
                 const angular = msg.w !== undefined ? msg.w : (msg.wz ?? 0);
                 this._robotVel = { linear, angular };
-                this.tf.updateOdom(this._robotPose);
+                return;
+            }
 
-                // Debug log every few frames to avoid console flood
-                if (Math.random() < 0.05) {
-                    console.debug(`[NavInternal:${this._robotId}] Inbound: h=${msg.h}°, x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
-                }
-            }).catch(() => {
-                const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta ?? this._robotPose.theta);
-                const x = msg.x !== undefined ? msg.x : (this._robotPose.x ?? 0);
-                const y = msg.y !== undefined ? msg.y : (this._robotPose.y ?? 0);
-                
-                this._robotPose = { x, y, theta };
+            // HEADING FIX: Negate firmware theta.
+            const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
+            const x = msg.x !== undefined ? msg.x : (this._robotPose.x ?? 0);
+            const y = msg.y !== undefined ? msg.y : (this._robotPose.y ?? 0);
 
-                // VELOCITY SIGN FIX (fallback path): same negation as primary path
-                const linear = msg.v !== undefined ? msg.v : (msg.vx ?? 0);
-                const angular = msg.w !== undefined ? msg.w : (msg.wz ?? 0);
-                this._robotVel = { linear, angular };
-                this.tf.updateOdom(this._robotPose);
-                
-                if (Math.random() < 0.05) {
-                    console.debug(`[NavInternal:${this._robotId}] Inbound (Fallback): x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
-                }
-            });
+            this._robotPose = { x, y, theta };
+
+            // VELOCITY SIGN FIX: Forward linear velocity should remain positive for the DWA planner's dynamic window.
+            const linear = msg.v !== undefined ? msg.v : (msg.vx || 0);
+            const angular = msg.w !== undefined ? msg.w : (msg.wz ?? 0);
+            this._robotVel = { linear, angular };
+            
+            // Update local TF instance
+            this.tf.updateOdom(this._robotPose);
+
+            if (Math.random() < 0.05) {
+                console.debug(`[NavController:${this._robotId}] Telemetry: x=${x.toFixed(2)}, y=${y.toFixed(2)}, v=${linear.toFixed(2)}`);
+            }
         });
 
         // Cập nhật costmap + SLAM từ LiDAR scans
@@ -173,6 +180,12 @@ class NavController {
         if (this._scanUnsub) this._scanUnsub();
         this._initialized = false;
         this._setState(NAV_STATE.IDLE);
+
+        if (this._plannerWorker) this._plannerWorker.terminate();
+        if (this._navWorker) this._navWorker.terminate();
+        this._plannerWorker = null;
+        this._navWorker = null;
+
         console.log('[NavController] Stopped.');
     }
 
@@ -247,14 +260,10 @@ class NavController {
         }
 
         const nextPose = this._throughPoses[this._throughIndex];
-        console.log(`[NavController] Navigating to waypoint ${this._throughIndex + 1}/${this._throughPoses.length}`);
-        this._goal = nextPose;
-        this._path = [];
-        this._stuckLastPos = { ...this._robotPose };
-        this._stuckStartTime = Date.now();
-
-        // Re-use planning logic
-        this._planLoop();
+        console.log(`[NavController] Transitioning to mission waypoint ${this._throughIndex + 1}/${this._throughPoses.length}`);
+        
+        // Use setGoal to properly transition state to PLANNING and trigger replan
+        this.setGoal(nextPose);
     }
 
     // ─── Velocity Smoother ─────────────────────────────────────────────────
@@ -310,30 +319,76 @@ class NavController {
         if (!this._goal) return;
 
         const mapPose = this.tf.getMapPose();
-        const path = this.globalPlanner.plan(mapPose, this._goal, this.costmap);
 
+        if (this._plannerWorker) {
+            if (this._isGlobalPlanning) return;
+            this._isGlobalPlanning = true;
+
+            const costmapGrid = this.costmap.getGrid();
+            // Need to pass a copy to avoid transferring the underlying buffer and breaking the main thread ArrayBuffer
+            const costmapCopy = new Uint8Array(costmapGrid).buffer;
+
+            this._plannerWorker.postMessage({
+                type: 'plan',
+                start: mapPose,
+                goal: this._goal,
+                costmapData: costmapCopy,
+                costmapMeta: {
+                    width: this.costmap._width,
+                    height: this.costmap._height,
+                    resolution: this.costmap._resolution,
+                    origin: { x: this.costmap._originX, y: this.costmap._originY }
+                }
+            }, [costmapCopy]);
+        } else {
+            // Fallback to main thread
+            const path = this.globalPlanner.plan(mapPose, this._goal, this.costmap);
+            this._handleGlobalPathResult(path);
+        }
+    }
+
+    _handlePlannerWorkerMsg(e) {
+        const msg = e.data;
+        if (msg.type === 'path') {
+            this._isGlobalPlanning = false;
+            this._handleGlobalPathResult(msg.path);
+        } else if (msg.type === 'error') {
+            this._isGlobalPlanning = false;
+            this._handleGlobalPathResult(null);
+            console.warn(`[NavController:${this._robotId}] Global planner worker failed:`, msg.message);
+        }
+    }
+
+    _handleGlobalPathResult(path) {
         if (!path || path.length === 0) {
-            console.warn(`[NavController:${this._robotId}] Global planner failed — no path.`);
+            console.warn(`[NavController:${this._robotId}] Global planner failed \u2014 no path.`);
             this._setState(NAV_STATE.FAILED);
             robotBridge.cmdVel(this._robotId, 0, 0);
             return;
         }
 
         this._path = path;
-        if (this._state === NAV_STATE.PLANNING) {
+        this._path = path;
+        // Transition to FOLLOWING if we were planning a path
+        if (this._state === NAV_STATE.PLANNING || this._state === NAV_STATE.NAVIGATING_THROUGH) {
             this._setState(NAV_STATE.FOLLOWING);
         }
         console.log(`[NavController] Path replanned: ${path.length} waypoints.`);
     }
 
     _cmdLoop() {
-        if (this._state !== NAV_STATE.FOLLOWING) return;
+        // Control loop should run when following a path or during through-navigation
+        if (this._state !== NAV_STATE.FOLLOWING && this._state !== NAV_STATE.NAVIGATING_THROUGH) return;
         if (!this._goal || !this._path.length) return;
 
         const mapPose = this.tf.getMapPose();
-
-        // ─── Goal check ────────────────────────────────────────────────────────
         const distToGoal = Math.hypot(this._goal.x - mapPose.x, this._goal.y - mapPose.y);
+
+        if (Math.random() < 0.05) {
+             console.log(`[NavController] Dist to goal: ${distToGoal.toFixed(2)}m | Pose: (${mapPose.x.toFixed(2)}, ${mapPose.y.toFixed(2)})`);
+        }
+        
+        // ─── Goal check ────────────────────────────────────────────────────────
         if (distToGoal < CONFIG.goalTolerance) {
             const yawErr = Math.abs(this._angleDiff(this._goal.theta, mapPose.theta));
             if (yawErr < CONFIG.yawTolerance) {
@@ -344,8 +399,8 @@ class NavController {
             }
             // Rotate in place to final heading
             // CMD SIGN FIX: Negate output to compensate for firmware's internal negation
-            const w = this._angleDiff(this._goal.theta, mapPose.theta) * 0.8;
-            robotBridge.cmdVel(this._robotId, 0, -Math.max(-0.5, Math.min(0.5, w)));
+            const w = this._angleDiff(this._goal.theta, mapPose.theta) * 0.4;
+            robotBridge.cmdVel(this._robotId, 0, Math.max(-0.2, Math.min(0.2, w)));
             return;
         }
 
@@ -365,7 +420,42 @@ class NavController {
         }
 
         // ─── DWA local planner ─────────────────────────────────────────────────
-        const cmd = this.dwaPlanner.computeVelocity(mapPose, this._robotVel, this._path, this.costmap);
+        if (this._navWorker) {
+            if (this._isLocalPlanning) return;
+            this._isLocalPlanning = true;
+
+            const costmapGrid = this.costmap.getGrid();
+            const costmapCopy = new Uint8Array(costmapGrid).buffer;
+
+            this._navWorker.postMessage({
+                type: 'state',
+                pose: mapPose,
+                velocity: this._robotVel,
+                path: this._path,
+                costmapData: costmapCopy,
+                costmapMeta: {
+                    width: this.costmap._width,
+                    height: this.costmap._height,
+                    resolution: this.costmap._resolution,
+                    origin: { x: this.costmap._originX, y: this.costmap._originY }
+                }
+            }, [costmapCopy]);
+        } else {
+            // Fallback to main thread
+            const cmd = this.dwaPlanner.computeVelocity(mapPose, this._robotVel, this._path, this.costmap);
+            this._handleLocalPlanResult(cmd, mapPose, distToGoal);
+        }
+    }
+
+    _handleNavWorkerMsg(e) {
+        const msg = e.data;
+        if (msg.type === 'cmd_vel') {
+            this._isLocalPlanning = false;
+            this._handleLocalPlanResult({ linear: msg.linear, angular: msg.angular }, this.tf.getMapPose(), 0);
+        }
+    }
+
+    _handleLocalPlanResult(cmd, mapPose, distToGoal) {
         if (!cmd) {
             robotBridge.cmdVel(this._robotId, 0, 0);
             return;
@@ -374,12 +464,11 @@ class NavController {
         // Apply velocity smoother
         const smoothed = this.smoothVelocity(cmd.linear, cmd.angular);
 
-        console.log(`[NavCmd:${this._robotId}] OUT ➔ v: ${smoothed.linear.toFixed(3)}, w: ${smoothed.angular.toFixed(3)} | Pose: (${mapPose.x.toFixed(2)}, ${mapPose.y.toFixed(2)}, ${(mapPose.theta * 180 / Math.PI).toFixed(1)}°) | GoalDist: ${distToGoal.toFixed(2)}m`);
-
-        // CMD SIGN FIX: Negate velocity commands to match coordinate convention.
-        // NavController positions are double-negated (true world coords),
-        // but firmware also negates incoming velocity (v = -v_app).
-        // Without this negation, sending +v makes robot go backward from NavController's view.
+        // CMD SIGN TEST: Reverted linear negation to see if it allows the robot to move.
+        // Some firmwares might already be handling the inversion.
+        if (Math.random() < 0.05) {
+            console.log(`[NavController] Sending cmdVel: v=${smoothed.linear.toFixed(3)}, w=${smoothed.angular.toFixed(3)}`);
+        }
         robotBridge.cmdVel(this._robotId, smoothed.linear, smoothed.angular);
     }
 
@@ -418,10 +507,35 @@ class NavController {
     getTFTree() { return this.tf; }
 
     /** Update DWA planner params at runtime from the app UI */
-    updateDWAParams(params) { this.dwaPlanner.updateParams(params); }
+    updateDWAParams(params) {
+        this.dwaPlanner.updateParams(params);
+        if (this._navWorker) {
+            this._navWorker.postMessage({ type: 'config', params });
+        }
+    }
 
     /** Get current DWA planner params for UI display */
     getDWAParams() { return this.dwaPlanner.getParams(); }
+
+    setOdometrySource(source = 'encoder') {
+        this._odometrySource = source || 'encoder';
+    }
+
+    applyExternalOdometry(odom = {}) {
+        const nextPose = {
+            x: Number.isFinite(odom.x) ? odom.x : this._robotPose.x,
+            y: Number.isFinite(odom.y) ? odom.y : this._robotPose.y,
+            theta: Number.isFinite(odom.theta) ? odom.theta : this._robotPose.theta,
+        };
+        const nextVel = {
+            linear: Number.isFinite(odom.v) ? odom.v : this._robotVel.linear,
+            angular: Number.isFinite(odom.omega) ? odom.omega : this._robotVel.angular,
+        };
+
+        this._robotPose = nextPose;
+        this._robotVel = nextVel;
+        this.tf.updateOdom(nextPose);
+    }
 
     // ─── Helper ───────────────────────────────────────────────────────────────
 

@@ -69,7 +69,7 @@ class ObstacleCritic {
 
             // COST_LETHAL is 254. COST_UNKNOWN is 255.
             // We only block if it's explicitly lethal.
-            if (cost >= 253 && cost < 255) return -100; // Collision with known obstacle
+            if (cost >= 254 && cost < 255) return -100; // Collision with known obstacle
 
             // Treat UNKNOWN (255) as navigable for now, but slightly less desirable
             // than clear space (0).
@@ -92,12 +92,12 @@ class VelocityCritic {
 // ─── Planner ────────────────────────────────────────────────────────────────
 
 const DEFAULTS = {
-    maxLinearVel: 0.2, // Reduced from 0.5 to prevent motor saturation and drift
+    maxLinearVel: 0.85, // Significant increase for straight lines
     minLinearVel: 0.0,
-    maxAngularVel: 1.0, // Reduced from 1.5 proportionally
-    minAngularVel: -1.0,
-    maxLinearAcc: 0.5,
-    maxAngularAcc: 2.0,
+    maxAngularVel: 0.6, // Tăng lên 0.6 để ôm cua tốt, không lạng
+    minAngularVel: -0.6,
+    maxLinearAcc: 0.8,  // Allow faster takeoff
+    maxAngularAcc: 1.2, // Tăng tốc tối đa khi xoay, giúp xe quay nhanh và không trễ khúc cua
     simTime: 1.5,
     dt: 0.1,
     vSamples: 15,
@@ -115,7 +115,7 @@ class DWAPlanner {
             new GoalDistCritic(0.2),
             new PathAlignCritic(0.2),
             new ObstacleCritic(0.3),
-            new VelocityCritic(0.1)
+            new VelocityCritic(0.35) // Increased weight to prioritize reaching max linear speed
         ];
     }
 
@@ -190,12 +190,16 @@ class DWAPlanner {
     }
 
     _getDynamicWindow(v) {
-        const dt = this._p.dt;
+        // We decouple the dynamic window from the extremely tight dt * acc bound.
+        // If we strictly bound vMax = v.linear + acc * dt, and dt=0.1, vMax might be 0.05.
+        // If the firmware ignores 0.05 due to deadbands, the robot never moves and v.linear stays 0.
+        // Instead, we allow the planner to pick from the full allowed velocity range,
+        // and rely on navController.smoothVelocity() to ramp it up smoothly.
         return {
-            vMin: Math.max(this._p.minLinearVel, v.linear - this._p.maxLinearAcc * dt),
-            vMax: Math.min(this._p.maxLinearVel, v.linear + this._p.maxLinearAcc * dt),
-            wMin: Math.max(this._p.minAngularVel, v.angular - this._p.maxAngularAcc * dt),
-            wMax: Math.min(this._p.maxAngularVel, v.angular + this._p.maxAngularAcc * dt)
+            vMin: this._p.minLinearVel,
+            vMax: this._p.maxLinearVel,
+            wMin: this._p.minAngularVel,
+            wMax: this._p.maxAngularVel
         };
     }
 

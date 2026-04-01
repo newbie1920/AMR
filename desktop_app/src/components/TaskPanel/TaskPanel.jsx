@@ -18,6 +18,7 @@ const TaskPanel = ({ onSelectWaypoint, isSelectingWaypoint, onCancelWaypointSele
         removeMission,
         clearCompletedMissions,
         updateMission,
+        resetMission,
     } = useMissionStore();
 
     const { robots, settings } = useFleetStore();
@@ -228,6 +229,7 @@ const TaskPanel = ({ onSelectWaypoint, isSelectingWaypoint, onCancelWaypointSele
                             onCancel={() => cancelMission(mission.id)}
                             onEdit={() => handleEditTask(mission.id)}
                             onRemove={() => removeMission(mission.id)}
+                            onReset={() => resetMission(mission.id)}
                         />
                     ))
                 )}

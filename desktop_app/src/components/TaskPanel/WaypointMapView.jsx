@@ -141,13 +141,25 @@ const WaypointMapView = ({ waypoints, onAddWaypoint, onRemoveWaypoint }) => {
         // Draw waypoint markers
         waypoints.forEach((wp, index) => {
             const pos = worldToCanvas(wp.x, wp.y);
+            const isOutOfBounds = wp.x < 0 || wp.x > WAREHOUSE_SIZE || wp.y < 0 || wp.y > WAREHOUSE_HEIGHT;
+
+            // Warning ring for out-of-bounds waypoints
+            if (isOutOfBounds) {
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 30, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
 
             // Glow effect
             const gradient = ctx.createRadialGradient(
                 pos.x, pos.y, 0,
                 pos.x, pos.y, 20
             );
-            gradient.addColorStop(0, '#00d4ff66');
+            gradient.addColorStop(0, isOutOfBounds ? '#ff444466' : '#00d4ff66');
             gradient.addColorStop(1, 'transparent');
             ctx.fillStyle = gradient;
             ctx.beginPath();
@@ -155,7 +167,7 @@ const WaypointMapView = ({ waypoints, onAddWaypoint, onRemoveWaypoint }) => {
             ctx.fill();
 
             // Marker circle
-            ctx.fillStyle = '#00d4ff';
+            ctx.fillStyle = isOutOfBounds ? '#ff4444' : '#00d4ff';
             ctx.beginPath();
             ctx.arc(pos.x, pos.y, 12, 0, Math.PI * 2);
             ctx.fill();
@@ -166,6 +178,14 @@ const WaypointMapView = ({ waypoints, onAddWaypoint, onRemoveWaypoint }) => {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText((index + 1).toString(), pos.x, pos.y);
+
+            // Warning text for out-of-bounds
+            if (isOutOfBounds) {
+                ctx.fillStyle = '#ff4444';
+                ctx.font = 'bold 10px Inter, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('⚠️ OUT', pos.x, pos.y + 25);
+            }
 
             // Draw heading arrow if enabled
             if (wp.thetaEnabled) {
@@ -272,6 +292,9 @@ const WaypointMapView = ({ waypoints, onAddWaypoint, onRemoveWaypoint }) => {
             if (onAddWaypoint) {
                 onAddWaypoint(worldPos.x, worldPos.y);
             }
+        } else {
+            // Show warning if clicking outside bounds
+            alert(`❌ Điểm (${worldPos.x.toFixed(1)}, ${worldPos.y.toFixed(1)}) nằm ngoài bản đồ!\n\nKích thước bản đồ: ${WAREHOUSE_SIZE}×${WAREHOUSE_HEIGHT}m\nClick vào vùng được khoanh (ranh giới xám).`);
         }
     };
 

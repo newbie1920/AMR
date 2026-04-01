@@ -57,6 +57,7 @@ const FleetPanel = () => {
         connectAllRobots,
         disconnectAllRobots,
         snapToDock,
+        toggleBrake,
         settings,
     } = useFleetStore();
 
@@ -252,6 +253,15 @@ const FleetPanel = () => {
                                         title={t('connect_all')}
                                     >
                                         ⚡
+                                    </button>
+                                )}
+                                {robot.connected && (
+                                    <button
+                                        className={`btn btn-sm ${robot.brakeEnabled ? 'btn-danger' : 'btn-secondary'}`}
+                                        onClick={() => toggleBrake(robot.id)}
+                                        title={robot.brakeEnabled ? (t('unlock_wheels') || 'Unlock wheels') : (t('lock_wheels') || 'Lock wheels')}
+                                    >
+                                        {robot.brakeEnabled ? '🔒' : '🔓'}
                                     </button>
                                 )}
                                 <button

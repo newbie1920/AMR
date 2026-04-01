@@ -182,7 +182,7 @@ function App() {
             <div className="fleet-app">
                 <Group id="main-layout" orientation="horizontal" className="main-panel-group">
                     {/* Left Sidebar - Fleet + Map Editor + Warehouse */}
-                    <Panel id="left-sidebar" defaultSize={33} minSize={10}>
+                    <Panel id="left-sidebar" defaultSize={20} minSize={10}>
                         <aside className="sidebar left-sidebar">
                             {/* Tab switcher */}
                             <div className="left-sidebar-tabs" ref={leftTabsRef}>
@@ -220,7 +220,7 @@ function App() {
                     <Separator id="s1" className="resize-handle" />
 
                     {/* Main Content - 3D Map */}
-                    <Panel id="main-content" defaultSize={34} minSize={10}>
+                    <Panel id="main-content" defaultSize={50} minSize={10}>
                         <main className="main-content">
                             <div className="content-top">
                                 <Map3D
@@ -234,7 +234,7 @@ function App() {
                     <Separator id="s2" className="resize-handle" />
 
                     {/* Right Sidebar - Control & Tasks */}
-                    <Panel id="right-sidebar" defaultSize={33} minSize={10}>
+                    <Panel id="right-sidebar" defaultSize={30} minSize={10}>
                         <aside className="sidebar right-sidebar">
                             <RightSidebar
                                 onSelectWaypoint={handleStartWaypointSelect}

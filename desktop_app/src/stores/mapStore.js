@@ -57,6 +57,34 @@ export const useMapStore = create(
                 obstacles: state.obstacles.filter(o => o.id !== id)
             })),
 
+            // Check if coordinates are within map bounds
+            isWithinBounds: (x, y) => {
+                const state = get();
+                return x >= 0 && x <= state.width && y >= 0 && y <= state.height;
+            },
+
+            // Get map boundaries
+            getBounds: () => {
+                const state = get();
+                return {
+                    minX: 0,
+                    maxX: state.width,
+                    minY: 0,
+                    maxY: state.height,
+                    width: state.width,
+                    height: state.height
+                };
+            },
+
+            // Clamp coordinates to bounds
+            clampToBounds: (x, y) => {
+                const state = get();
+                return {
+                    x: Math.max(0, Math.min(x, state.width)),
+                    y: Math.max(0, Math.min(y, state.height))
+                };
+            },
+
             resetMap: () => set({
                 width: 15,
                 height: 15,
