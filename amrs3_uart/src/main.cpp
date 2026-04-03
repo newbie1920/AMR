@@ -1,7 +1,41 @@
 
 // ============================================================
-//   AMR S3 FIRMWARE — ESP32-S3 N16R8 (USB Lidar Version)
-//   IMU + Encoder Fusion + RPLidar A1M8 (via USB Host)
+//   AMR S3 FIRMWARE — ESP32-S3 N16R8
+//   IMU + Encoder Fusion + RPLidar A1M8
+// ============================================================
+//
+//   ┌─────────────────────────────────────────────────┐
+//   │              PIN MAP (ESP32-S3)                 │
+//   ├──────────────────────┬──────────────────────────┤
+//   │ Motor Driver (L298N) │                          │
+//   │   MOTOR_LEFT_EN      │ GPIO 8  (PWM)            │
+//   │   MOTOR_LEFT_IN1     │ GPIO 9                   │
+//   │   MOTOR_LEFT_IN2     │ GPIO 10                  │
+//   │   MOTOR_RIGHT_EN     │ GPIO 11 (PWM)            │
+//   │   MOTOR_RIGHT_IN3    │ GPIO 12                  │
+//   │   MOTOR_RIGHT_IN4    │ GPIO 13                  │
+//   ├──────────────────────┼──────────────────────────┤
+//   │ Encoder              │                          │
+//   │   ENC_LEFT_A         │ GPIO 4                   │
+//   │   ENC_LEFT_B         │ GPIO 5                   │
+//   │   ENC_RIGHT_A        │ GPIO 6                   │
+//   │   ENC_RIGHT_B        │ GPIO 7                   │
+//   ├──────────────────────┼──────────────────────────┤
+//   │ I2C (IMU + OLED)     │                          │
+//   │   SDA                │ GPIO 39 (Fixed conflict) │
+//   │   SCL                │ GPIO 40 (Fixed conflict) │
+//   ├──────────────────────┼──────────────────────────┤
+//   │ RPLidar A1M8 (UART1) │                          │
+//   │   LIDAR_TX → ESP RX  │ GPIO 18                  │
+//   │   LIDAR_RX → ESP TX  │ GPIO 17                  │
+//   │   LIDAR_MOTOR_PWM    │ GPIO 16 (PWM spin motor) │
+//   ├──────────────────────┼──────────────────────────┤
+//   │ Battery ADC          │ GPIO 1  (ADC1_CH0)       │
+//   └──────────────────────┴──────────────────────────┘
+//
+//   NOTE:  Avoid GPIO 0, 3, 19, 20 (USB/boot strapping)
+//          Avoid GPIO 26–32 (used by PSRAM on N16R8 OPI)
+//          GPIO 35–37 input-only on some revisions
 // ============================================================
 
 #include <Adafruit_GFX.h>
@@ -14,14 +48,11 @@
 #include <HardwareSerial.h>
 #include <RPLidar.h>
 #include <TelnetStream.h>
-#include <USBHostSerial.h> // Library cho USB Host CDC
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFiManager.h>
 #include <Wire.h>
 #include <esp_wifi.h>
-#include <stdarg.h>
-#include <stdio.h>
 
 // ─── OLED ────────────────────────────────────────────────────────────────────
 #define SCREEN_WIDTH 128
@@ -49,32 +80,22 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define IMU_SDA 39
 #define IMU_SCL 40
 
-// Battery ADC
+// Battery ADC (ADC1 — luôn an toàn khi WiFi bật)
+// NOTE: GPIO 16 is used by LIDAR_MOTOR_PIN — moved battery to GPIO 2
 #define BATT_PIN 2
 
-// Status RGB LED
+// Status RGB LED (Built-in NeoPixel on ESP32-S3)
 #define RGB_LED_PIN 48
 Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
-// ─── RPLidar A1M8 (USB TYPE-C) ───────────────────────────────────────────────
-#define LIDAR_MOTOR_PIN 16
+// ─── RPLidar A1M8 ────────────────────────────────────────────────────────────
+// Dùng UART1 (Serial1) của ESP32-S3
+#define LIDAR_SERIAL_RX 18 // Lidar TX → ESP RX
+#define LIDAR_SERIAL_TX 17 // Lidar RX → ESP TX (chỉ dùng để gửi lệnh)
+#define LIDAR_MOTOR_PIN 16 // MOTOCTL của A1M8 — HIGH = motor quay
 #define LIDAR_BAUDRATE 115200
 
-USBHostSerial usbHost;
-RPLidar lidar;
-
-// ============================================================
-//   HEARTBEAT / LOGGING
-// ============================================================
-// Redirect all logs to TelnetStream since Serial might conflict with USB Host
-void log_info(const char *format, ...) {
-  char buf[256];
-  va_list args;
-  va_start(args, format);
-  vsnprintf(buf, sizeof(buf), format, args);
-  va_end(args);
-  TelnetStream.print(buf);
-}
+RPLidar lidar; // Đối tượng RPLidar (thư viện robopeak/RPLidar)
 
 // Lưu trữ scan mới nhất
 struct LidarPoint {
@@ -86,7 +107,7 @@ static const int MAX_SCAN_POINTS = 360;
 LidarPoint scanData[MAX_SCAN_POINTS];
 int scanCount = 0;
 bool lidarOK = false;
-bool oledOK = false;
+bool oledOK = false; // Track OLED availability to avoid I2C spam
 unsigned long lastScanBroadcast = 0;
 
 // ─── MPU6050 ─────────────────────────────────────────────────────────────────
@@ -99,9 +120,9 @@ unsigned long lastScanBroadcast = 0;
 #define BATT_MAX_V 8.4f
 
 // ─── ROBOT KINEMATICS ────────────────────────────────────────────────────────
-float WHEEL_RADIUS = 0.0264f;
-float WHEEL_SEPARATION = 0.170f;
-int TICKS_PER_REV = 1665;
+float WHEEL_RADIUS = 0.0264f;    // Meters
+float WHEEL_SEPARATION = 0.170f; // Meters
+int TICKS_PER_REV = 1665;        // Ticks per revolution
 
 // ─── IMU FUSION ──────────────────────────────────────────────────────────────
 float COMP_FILTER_ALPHA = 0.95f;
@@ -178,14 +199,17 @@ void mpu6050_writeReg(uint8_t reg, uint8_t val) {
 int16_t mpu6050_readReg16(uint8_t reg) {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(reg);
-  uint8_t err = Wire.endTransmission();
+  uint8_t err = Wire.endTransmission(); // Defaults to true, sends STOP. Avoids
+                                        // i2cWriteReadNonStop driver bug
   if (err != 0) {
+    // I2C bus error — attempt recovery
     Wire.begin(IMU_SDA, IMU_SCL);
-    Wire.setClock(400000);
+    Wire.setClock(400000); // Khôi phục 400kHz sau khi đổi chân an toàn
     return 0;
   }
   uint8_t rcv = Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)2);
   if (rcv < 2) {
+    // Recovery on read timeout
     Wire.end();
     delay(2);
     Wire.begin(IMU_SDA, IMU_SCL);
@@ -197,37 +221,37 @@ int16_t mpu6050_readReg16(uint8_t reg) {
 
 bool mpu6050_init() {
   Wire.begin(IMU_SDA, IMU_SCL);
-  Wire.setClock(400000);
+  Wire.setClock(400000); // Khôi phục 400kHz
   Wire.setTimeout(20);
 
   Wire.beginTransmission(MPU6050_ADDR);
-  Wire.write(0x75);
+  Wire.write(0x75); // WHO_AM_I
   Wire.endTransmission(false);
   Wire.requestFrom((uint8_t)MPU6050_ADDR, (uint8_t)1);
 
   if (Wire.available() < 1) {
-    log_info("[IMU] MPU6050 NOT FOUND!\n");
+    Serial.println("[IMU] MPU6050 NOT FOUND!");
     return false;
   }
 
   uint8_t whoAmI = Wire.read();
-  log_info("[IMU] WHO_AM_I: 0x%02X\n", whoAmI);
+  Serial.printf("[IMU] WHO_AM_I: 0x%02X\n", whoAmI);
   if (whoAmI != 0x68 && whoAmI != 0x72)
-    log_info("[IMU] Unknown device, attempting anyway...\n");
+    Serial.println("[IMU] Unknown device, attempting anyway...");
 
-  mpu6050_writeReg(0x6B, 0x00);
+  mpu6050_writeReg(0x6B, 0x00); // Wake up
   delay(100);
-  mpu6050_writeReg(0x1B, 0x00);
-  mpu6050_writeReg(0x1A, 0x06);
-  mpu6050_writeReg(0x19, 0x04);
+  mpu6050_writeReg(0x1B, 0x00); // ±250°/s
+  mpu6050_writeReg(0x1A, 0x06); // DLPF 5Hz
+  mpu6050_writeReg(0x19, 0x04); // 200Hz sample rate
 
-  log_info("[IMU] MPU6050 init OK (±250°/s, DLPF=5Hz, 200Hz)\n");
+  Serial.println("[IMU] MPU6050 init OK (±250°/s, DLPF=5Hz, 200Hz)");
   return true;
 }
 
 float mpu6050_readGyroZ() {
   int16_t raw = mpu6050_readReg16(0x47);
-  return (raw / 131.0f) * (PI / 180.0f);
+  return (raw / 131.0f) * (PI / 180.0f); // rad/s
 }
 
 void mpu6050_calibrate(float rawZ) {
@@ -236,13 +260,15 @@ void mpu6050_calibrate(float rawZ) {
   if (gyroCalSamples >= GYRO_CAL_COUNT) {
     gyroZBias = gyroCalSum / (float)gyroCalSamples;
     gyroCalibrated = true;
-    log_info("[IMU] Gyro calibrated. Bias: %.6f rad/s\n", gyroZBias);
+    Serial.printf("[IMU] Gyro calibrated. Bias: %.6f rad/s\n", gyroZBias);
   }
 }
 
 // ============================================================
 //   RPLIDAR A1M8 FUNCTIONS
 // ============================================================
+
+// Khởi động motor LiDAR qua chân MOTOCTL (HIGH = quay)
 void lidar_motorStart() {
   pinMode(LIDAR_MOTOR_PIN, OUTPUT);
   digitalWrite(LIDAR_MOTOR_PIN, HIGH);
@@ -251,55 +277,60 @@ void lidar_motorStart() {
 void lidar_motorStop() { digitalWrite(LIDAR_MOTOR_PIN, LOW); }
 
 bool lidar_init() {
-  log_info("[LIDAR] Initializing USB Host Serial...\n");
-  // Initialize USB Host Serial (Default 8N1 for Lidar)
-  // stopbits: 0: 1 stopbit, parity: 0: None, databits: 8
-  usbHost.begin(LIDAR_BAUDRATE, 0, 0, 8);
-  lidar.begin(usbHost);
+  // RPLidar thư viện dùng Serial1 tùy chỉnh chân
+  Serial1.begin(LIDAR_BAUDRATE, SERIAL_8N1, LIDAR_SERIAL_RX, LIDAR_SERIAL_TX);
+  lidar.begin(Serial1);
 
   lidar_motorStart();
-  delay(1000);
+  delay(1000); // Đợi motor ổn định
 
+  // Kiểm tra sức khỏe thiết bị
   rplidar_response_device_health_t healthInfo;
   if (IS_OK(lidar.getHealth(healthInfo, 1000))) {
-    log_info("[LIDAR] Health: status=%d, err=%d\n", healthInfo.status,
-             healthInfo.error_code);
+    Serial.printf("[LIDAR] Health: status=%d, err=%d\n", healthInfo.status,
+                  healthInfo.error_code);
     if (healthInfo.status == RPLIDAR_STATUS_ERROR) {
-      log_info("[LIDAR] ERROR status! Restarting...\n");
+      Serial.println("[LIDAR] ERROR status! Attempting to restart scan...");
       lidar_motorStop();
       delay(100);
       lidar_motorStart();
       delay(1000);
     }
   } else {
-    log_info("[LIDAR] Cannot get health info!\n");
+    Serial.println("[LIDAR] Cannot get health info!");
     return false;
   }
 
+  // Lấy thông tin thiết bị
   rplidar_response_device_info_t devInfo;
   if (IS_OK(lidar.getDeviceInfo(devInfo, 1000))) {
-    log_info("[LIDAR] Model: %d | FW: %d.%d | HW: %d\n", devInfo.model,
-             devInfo.firmware_version >> 8, devInfo.firmware_version & 0xFF,
-             devInfo.hardware_version);
+    Serial.printf("[LIDAR] Model: %d | FW: %d.%d | HW: %d\n", devInfo.model,
+                  devInfo.firmware_version >> 8,
+                  devInfo.firmware_version & 0xFF, devInfo.hardware_version);
   }
 
+  // Bắt đầu quét Express Scan (nếu A1M8 hỗ trợ), fallback sang Standard
   if (!IS_OK(lidar.startScan(false, 1))) {
-    log_info("[LIDAR] Start scan failed!\n");
+    Serial.println("[LIDAR] Start scan failed!");
     return false;
   }
 
-  log_info("[LIDAR] RPLidar A1M8 USB init OK — scanning...\n");
+  Serial.println("[LIDAR] RPLidar A1M8 init OK — scanning...");
   return true;
 }
 
+// Đọc các điểm scan sẵn có trong UART buffer (NON-BLOCKING)
+// Gọi mỗi vòng loop để thu thập dữ liệu
 void lidar_readPoints() {
   if (!lidarOK)
     return;
+
   while (IS_OK(lidar.waitPoint())) {
     float angle = lidar.getCurrentPoint().angle;
     float dist = lidar.getCurrentPoint().distance;
     uint8_t qual = lidar.getCurrentPoint().quality;
-    if (dist > 0 && qual > 5) {
+
+    if (dist > 0 && qual > 5) { // Bỏ qua điểm không hợp lệ
       int idx = (int)angle % MAX_SCAN_POINTS;
       if (idx >= 0 && idx < MAX_SCAN_POINTS) {
         scanData[idx].angle = angle;
@@ -311,23 +342,29 @@ void lidar_readPoints() {
   }
 }
 
+// Gửi dữ liệu LiDAR qua WebSocket (dạng nén mảng float)
+// Gửi 3Hz để không làm nghẽn băng thông
 void lidar_broadcast() {
   if (!lidarOK || scanCount == 0)
     return;
   if (millis() - lastScanBroadcast < 333)
-    return;
+    return; // ~3Hz
   lastScanBroadcast = millis();
 
+  // Tạo JSON dạng gọn: {"lidar":[angle,dist, angle,dist, ...]}
+  // Giới hạn 180 điểm mỗi lần để không quá tải WebSocket
   JsonDocument doc;
   doc["lidar"] = true;
   JsonArray arr = doc["pts"].to<JsonArray>();
-  int step = max(1, scanCount / 180);
+
+  int step = max(1, scanCount / 180); // Lấy mẫu nếu quá nhiều
   for (int i = 0; i < scanCount; i += step) {
     if (scanData[i].distance > 0 && scanData[i].quality > 5) {
       arr.add((int)scanData[i].angle);
       arr.add((int)scanData[i].distance);
     }
   }
+
   String out;
   serializeJson(doc, out);
   webSocket.broadcastTXT(out);
@@ -360,10 +397,15 @@ void IRAM_ATTR rightISR() {
   lastEncodedRight = encoded;
 }
 
+// ============================================================
+//   MOTOR CONTROL
+//   ESP32-S3: dùng ledcAttach() API mới (thay ledcSetup/ledcAttachPin)
+// ============================================================
 void setMotor(int pinIN1, int pinIN2, int pwmCh, float u) {
   int pwr = (int)fabs(u);
   if (pwr > 255)
     pwr = 255;
+
   if (u > 0) {
     digitalWrite(pinIN1, HIGH);
     digitalWrite(pinIN2, LOW);
@@ -384,27 +426,37 @@ void setMotor(int pinIN1, int pinIN2, int pwmCh, float u) {
   ledcWrite(pwmCh, pwr);
 }
 
+// ============================================================
+//   SETUP
+// ============================================================
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(500); // Đợi USB CDC ổn định
 
+  // ── Motor Pins ──────────────────────────────────────────
   pinMode(MOTOR_LEFT_IN1, OUTPUT);
   pinMode(MOTOR_LEFT_IN2, OUTPUT);
   pinMode(MOTOR_RIGHT_IN3, OUTPUT);
   pinMode(MOTOR_RIGHT_IN4, OUTPUT);
-  ledcSetup(0, 20000, 8);
+
+  // ledcSetup(channel, freq, resolution)
+  // ledcAttachPin(pin, channel)
+  ledcSetup(0, 20000, 8); // 20kHz, 8-bit, Channel 0
   ledcAttachPin(MOTOR_LEFT_EN, 0);
-  ledcSetup(1, 20000, 8);
+  ledcSetup(1, 20000, 8); // 20kHz, 8-bit, Channel 1
   ledcAttachPin(MOTOR_RIGHT_EN, 1);
 
+  // ── Battery ADC ─────────────────────────────────────────
   analogSetPinAttenuation(BATT_PIN, ADC_11db);
   pinMode(BATT_PIN, INPUT);
 
+  // ── Status RGB LED ─────────────────────────────────────
   rgbLed.begin();
   rgbLed.setBrightness(30);
-  rgbLed.setPixelColor(0, rgbLed.Color(0, 0, 50));
+  rgbLed.setPixelColor(0, rgbLed.Color(0, 0, 50)); // Blue on startup
   rgbLed.show();
 
+  // ── Encoders ────────────────────────────────────────────
   pinMode(ENCODER_LEFT_A, INPUT_PULLUP);
   pinMode(ENCODER_LEFT_B, INPUT_PULLUP);
   pinMode(ENCODER_RIGHT_A, INPUT_PULLUP);
@@ -414,45 +466,70 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODER_RIGHT_A), rightISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_RIGHT_B), rightISR, CHANGE);
 
+  // ── IMU ─────────────────────────────────────────────────
   imuAvailable = mpu6050_init();
+  if (imuAvailable)
+    Serial.println("[IMU] MPU6050 OK — calibrating gyro...");
+  else
+    Serial.println("[IMU] MPU6050 NOT found — encoder-only mode.");
 
+  // ── OLED ────────────────────────────────────────────────
   oledOK = display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS);
-  if (oledOK) {
+  if (!oledOK) {
+    Serial.println("[OLED] SSD1306 not found — skipping OLED.");
+  } else {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.println("AMR S3 USB Mode...");
+    display.println("AMR S3 Boot...");
     display.println("Connecting WiFi");
     display.display();
   }
 
+  // ── WiFi ─────────────────────────────────────────────────
   WiFiManager wm;
-  wm.autoConnect("AMR_S3_USB_AP");
+  wm.autoConnect("AMR_S3_AP");
   WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   esp_wifi_set_ps(WIFI_PS_NONE);
 
   if (MDNS.begin("amrs3")) {
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("ws", "tcp", 81);
+    Serial.println("[NET] mDNS: amrs3.local");
   }
 
-  ArduinoOTA.setHostname("amr-s3-usb");
+  // ── OTA ──────────────────────────────────────────────────
+  ArduinoOTA.setHostname("amr-s3");
+  ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
+  ArduinoOTA.onEnd([]() { Serial.println("\nOTA End"); });
+  ArduinoOTA.onProgress([](unsigned int p, unsigned int t) {
+    Serial.printf("OTA: %u%%\r", (p / (t / 100)));
+  });
+  ArduinoOTA.onError(
+      [](ota_error_t e) { Serial.printf("OTA Error[%u]\n", e); });
   ArduinoOTA.begin();
   TelnetStream.begin();
 
+  // ── RPLidar A1M8 ────────────────────────────────────────
   lidarOK = lidar_init();
-  if (!lidarOK)
+  if (!lidarOK) {
+    Serial.println("[LIDAR] Init FAILED — running without LiDAR.");
     lidar_motorStop();
+  }
 
+  // ── WebSocket ────────────────────────────────────────────
   webSocket.begin();
   webSocket.onEvent(
       [](uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
         if (type != WStype_TEXT)
           return;
+
         JsonDocument doc;
         deserializeJson(doc, payload);
 
+        // PING/PONG
         if (doc["type"] == "ping") {
           JsonDocument pong;
           pong["type"] = "pong";
@@ -463,27 +540,31 @@ void setup() {
           return;
         }
 
+        // RESET ODOMETRY
         if (doc["cmd"] == "reset_odom") {
           robotX = robotY = robotTheta = robotDistance = 0;
           leftTicks = rightTicks = lastTicksL = lastTicksR = 0;
           targetLeftVel = targetRightVel = 0;
           gyroTheta = encoderTheta = fusedTheta = 0;
-          log_info("[CMD] Odometry reset.\n");
+          Serial.println("[CMD] Odometry reset.");
         }
 
+        // RECALIBRATE GYRO
         if (doc["cmd"] == "recal_gyro") {
           gyroCalibrated = false;
           gyroCalSamples = 0;
           gyroCalSum = 0;
           gyroZBias = 0;
-          log_info("[IMU] Gyro recalibrating...\n");
+          Serial.println("[IMU] Gyro recalibrating...");
         }
 
+        // BRAKE
         if (doc["cmd"] == "brake") {
           brakeEnabled = doc["val"];
-          log_info("[CMD] Brake: %d\n", brakeEnabled);
+          Serial.printf("[CMD] Brake: %d\n", brakeEnabled);
         }
 
+        // LIDAR: Start/Stop motor
         if (doc["cmd"] == "lidar_start") {
           if (!lidarOK) {
             lidarOK = lidar_init();
@@ -491,23 +572,27 @@ void setup() {
             lidar_motorStart();
             lidar.startScan(false, 1);
           }
-          log_info("[LIDAR] Start command received.\n");
+          Serial.println("[LIDAR] Start command received.");
         }
-
         if (doc["cmd"] == "lidar_stop") {
           lidar.stop();
           lidar_motorStop();
-          log_info("[LIDAR] Stop command received.\n");
+          Serial.println("[LIDAR] Stop command received.");
         }
 
+        // LED (RGB Control)
         if (doc["cmd"] == "led") {
           bool val = doc["val"];
-          rgbLed.setPixelColor(0, val ? rgbLed.Color(0, 150, 0)
-                                      : rgbLed.Color(0, 0, 0));
+          if (val) {
+            rgbLed.setPixelColor(0, rgbLed.Color(0, 150, 0)); // Green
+          } else {
+            rgbLed.setPixelColor(0, rgbLed.Color(0, 0, 0)); // Off
+          }
           rgbLed.show();
-          log_info("[CMD] RGB LED: %d\n", val);
+          Serial.printf("[CMD] RGB LED: %d\n", val);
         }
 
+        // CONFIG
         if (doc["type"] == "config") {
           if (!doc["ticks_per_rev"].isNull())
             TICKS_PER_REV = doc["ticks_per_rev"];
@@ -526,9 +611,9 @@ void setup() {
           if (!doc["comp_alpha"].isNull())
             COMP_FILTER_ALPHA =
                 constrain(doc["comp_alpha"].as<float>(), 0.0f, 1.0f);
-          log_info("[CMD] Config updated.\n");
         }
 
+        // VELOCITY COMMAND
         if (!doc["linear"].isNull()) {
           float v = doc["linear"];
           float w = doc["angular"];
@@ -543,20 +628,21 @@ void setup() {
   server.begin();
   prevT = micros();
 
-  log_info("================================================\n");
-  log_info("  AMR S3 FIRMWARE — USB HOST MODE              \n");
-  log_info("  IP: %s\n", WiFi.localIP().toString().c_str());
-  log_info("  IMU   : %s\n", imuAvailable ? "MPU6050 OK" : "NOT FOUND");
-  log_info("  LiDAR : %s\n", lidarOK ? "A1M8 OK" : "NOT FOUND");
-  log_info("  Alpha : %.2f\n", COMP_FILTER_ALPHA);
-  log_info("================================================\n");
+  Serial.println("================================================");
+  Serial.println("  AMR S3 FIRMWARE — ESP32-S3 N16R8             ");
+  Serial.printf("  IP: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("  IMU   : %s\n", imuAvailable ? "MPU6050 OK" : "NOT FOUND");
+  Serial.printf("  LiDAR : %s\n", lidarOK ? "A1M8 OK" : "NOT FOUND");
+  Serial.printf("  Alpha : %.2f\n", COMP_FILTER_ALPHA);
+  Serial.println("================================================");
 
+  // OLED: IP
   if (oledOK) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.println("AMR S3 USB READY");
+    display.println("AMR S3 READY");
     display.print("IP: ");
     display.println(WiFi.localIP());
     display.printf("IMU:%s LiDAR:%s\n", imuAvailable ? "OK" : "--",
@@ -565,24 +651,33 @@ void setup() {
   }
 }
 
+// ============================================================
+//   MAIN LOOP
+// ============================================================
 void loop() {
   ArduinoOTA.handle();
   webSocket.loop();
   server.handleClient();
 
+  // ── Safety failsafe (timeout) ──────────────────────────
   if (millis() - lastCmdTime > cmdTimeout) {
     targetLeftVel = 0;
     targetRightVel = 0;
   }
 
+  // ── LiDAR: đọc liên tục (non-blocking) ─────────────────
   lidar_readPoints();
 
+  // ═══════════════════════════════════════════════════════
+  //   Control Loop: 50Hz
+  // ═══════════════════════════════════════════════════════
   long currT = micros();
   float deltaT = ((float)(currT - prevT)) / 1.0e6f;
 
   if (deltaT >= 0.02f) {
     prevT = currT;
 
+    // ── IMU Read ──────────────────────────────────────────
     if (imuAvailable) {
       gyroZ_raw = mpu6050_readGyroZ();
       if (!gyroCalibrated) {
@@ -598,6 +693,7 @@ void loop() {
       }
     }
 
+    // ── Read Encoders ─────────────────────────────────────
     noInterrupts();
     long cL = leftTicks;
     long cR = rightTicks;
@@ -612,11 +708,14 @@ void loop() {
     lastTicksL = cL;
     lastTicksR = cR;
 
+    // ── Kinematics ────────────────────────────────────────
     float v_robot = (vR_meas + vL_meas) / 2.0f * WHEEL_RADIUS;
     float w_encoder = (vR_meas - vL_meas) * WHEEL_RADIUS / WHEEL_SEPARATION;
+
     encoderTheta += w_encoder * deltaT;
     encoderTheta = atan2(sin(encoderTheta), cos(encoderTheta));
 
+    // ── Sensor Fusion ─────────────────────────────────────
     float w_fused;
     if (imuAvailable && gyroCalibrated) {
       float diff = gyroTheta - encoderTheta;
@@ -640,6 +739,7 @@ void loop() {
     robotX += dist * cos(robotTheta);
     robotY += dist * sin(robotTheta);
 
+    // ── Motor PI + FF ─────────────────────────────────────
     float pwmLeft = 0, pwmRight = 0;
     float targetL = targetLeftVel, targetR = targetRightVel;
 
@@ -669,11 +769,15 @@ void loop() {
     if (invertRightMotor)
       pwmRight = -pwmRight;
 
+    // ESP32-S3: ledcWrite với Channel
     setMotor(MOTOR_LEFT_IN1, MOTOR_LEFT_IN2, 0, pwmLeft);
     setMotor(MOTOR_RIGHT_IN3, MOTOR_RIGHT_IN4, 1, pwmRight);
 
+    // ── Telemetry & LiDAR Broadcast (5Hz) ────────────────
     if (millis() - lastTelemetryTime > 200) {
       lastTelemetryTime = millis();
+
+      // Battery
       float b_sum = 0;
       for (int i = 0; i < 10; i++)
         b_sum += analogRead(BATT_PIN);
@@ -714,13 +818,15 @@ void loop() {
       telem["pwmL"] = (int)lastPwmLeft;
       telem["pwmR"] = (int)lastPwmRight;
       telem["batt"] = battPct;
-      telem["batt_v"] = filteredVBatt;
 
       String out;
       serializeJson(telem, out);
       webSocket.broadcastTXT(out);
+
+      // Gửi LiDAR scan (3Hz tự điều tiết bên trong)
       lidar_broadcast();
 
+      // ── OLED (1Hz) — only if display present ───────────
       if (oledOK && millis() - lastOledUpdateTime > 1000) {
         lastOledUpdateTime = millis();
         display.clearDisplay();
@@ -745,9 +851,9 @@ void loop() {
         display.display();
       }
 
-      log_info("L:%ld R:%ld | vL:%.1f vR:%.1f | θ:%.1f° LiDAR:%s\n", cL, cR,
-               vL_meas, vR_meas, fusedTheta * 180.0f / PI,
-               lidarOK ? "OK" : "--");
+      TelnetStream.printf("L:%ld R:%ld | vL:%.1f vR:%.1f | θ:%.1f° LiDAR:%s\n",
+                          cL, cR, vL_meas, vR_meas, fusedTheta * 180.0f / PI,
+                          lidarOK ? "OK" : "--");
     }
   }
 }
