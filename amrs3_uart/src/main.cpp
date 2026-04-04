@@ -26,11 +26,11 @@
 //   │   SCL                │ GPIO 40 (Fixed conflict) │
 //   ├──────────────────────┼──────────────────────────┤
 //   │ RPLidar A1M8 (UART1) │                          │
-//   │   LIDAR_TX → ESP RX  │ GPIO 18                  │
-//   │   LIDAR_RX → ESP TX  │ GPIO 17                  │
-//   │   LIDAR_MOTOR_PWM    │ GPIO 16 (PWM spin motor) │
+//   │   LIDAR_TX → ESP RX  │ GPIO 15 (Safe)           │
+//   │   LIDAR_RX → ESP TX  │ GPIO 16 (Safe)           │
+//   │   LIDAR_MOTOR_PWM    │ GPIO 21 (PWM spin motor) │
 //   ├──────────────────────┼──────────────────────────┤
-//   │ Battery ADC          │ GPIO 1  (ADC1_CH0)       │
+//   │ Battery ADC          │ GPIO 2  (ADC1_CH1)       │
 //   └──────────────────────┴──────────────────────────┘
 //
 //   NOTE:  Avoid GPIO 0, 3, 19, 20 (USB/boot strapping)
@@ -90,9 +90,11 @@ Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // ─── RPLidar A1M8 ────────────────────────────────────────────────────────────
 // Dùng UART1 (Serial1) của ESP32-S3
-#define LIDAR_SERIAL_RX 18 // Lidar TX → ESP RX
-#define LIDAR_SERIAL_TX 17 // Lidar RX → ESP TX (chỉ dùng để gửi lệnh)
-#define LIDAR_MOTOR_PIN 16 // MOTOCTL của A1M8 — HIGH = motor quay
+// CHÚ Ý: ESP32-S3-N16R8 sử dụng Octal PSRAM (OPI), các chân 33, 34, 35, 36, 37
+// được dùng nội bộ cho bộ nhớ PSRAM này. Tuyệt đối không dùng cho UART.
+#define LIDAR_SERIAL_RX 15 
+#define LIDAR_SERIAL_TX 16 
+#define LIDAR_MOTOR_PIN 21 
 #define LIDAR_BAUDRATE 115200
 
 RPLidar lidar; // Đối tượng RPLidar (thư viện robopeak/RPLidar)
@@ -114,10 +116,11 @@ unsigned long lastScanBroadcast = 0;
 #define MPU6050_ADDR 0x68
 
 // ─── BATTERY CALIBRATION ─────────────────────────────────────────────────────
-#define BATT_SCALE_FACTOR 5.80f
+#define BATT_SCALE_FACTOR 2.0f // Tỉ lệ phân áp (bạn có thể cần chỉnh lại theo phần cứng)
 #define BATT_OFFSET 0.0f
 #define BATT_MIN_V 6.6f
 #define BATT_MAX_V 8.4f
+#define BATT_V_REF 3.3f
 
 // ─── ROBOT KINEMATICS ────────────────────────────────────────────────────────
 float WHEEL_RADIUS = 0.0264f;    // Meters
@@ -180,11 +183,13 @@ float robotY = 0;
 float robotTheta = 0;
 float robotDistance = 0;
 float filteredVBatt = 12.0f;
+unsigned long lastLidarRetry = 0;
 unsigned long lastTelemetryTime = 0;
 unsigned long lastOledUpdateTime = 0;
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
+WiFiManager wm; // Move to global to avoid stack corruption
 
 // ============================================================
 //   MPU6050 BARE-METAL FUNCTIONS
@@ -277,67 +282,48 @@ void lidar_motorStart() {
 void lidar_motorStop() { digitalWrite(LIDAR_MOTOR_PIN, LOW); }
 
 bool lidar_init() {
-  // RPLidar thư viện dùng Serial1 tùy chỉnh chân
+  Serial.println("[LIDAR] Starting initialization...");
+  
+  // Khởi động Serial1 cho LiDAR
   Serial1.begin(LIDAR_BAUDRATE, SERIAL_8N1, LIDAR_SERIAL_RX, LIDAR_SERIAL_TX);
   lidar.begin(Serial1);
 
+  // BẬT MOTOR NGAY LẬP TỨC VÀ KHÔNG TẮT
   lidar_motorStart();
-  delay(1000); // Đợi motor ổn định
-
-  // Kiểm tra sức khỏe thiết bị
-  rplidar_response_device_health_t healthInfo;
-  if (IS_OK(lidar.getHealth(healthInfo, 1000))) {
-    Serial.printf("[LIDAR] Health: status=%d, err=%d\n", healthInfo.status,
-                  healthInfo.error_code);
-    if (healthInfo.status == RPLIDAR_STATUS_ERROR) {
-      Serial.println("[LIDAR] ERROR status! Attempting to restart scan...");
-      lidar_motorStop();
-      delay(100);
-      lidar_motorStart();
-      delay(1000);
-    }
+  Serial.println("[LIDAR] Motor is ON.");
+  
+  // Thử khởi động scan lần đầu - Tăng thời gian chờ lên 2s cho motor ổn định
+  u_result res = lidar.startScan(false, 2000);
+  if (IS_OK(res)) {
+    Serial.println("[LIDAR] Initial scan started.");
+    return true;
   } else {
-    Serial.println("[LIDAR] Cannot get health info!");
-    return false;
+    Serial.println("[LIDAR] Initial scan failed — will retry in loop().");
+    return false; // Loop() sẽ tiếp quản việc retry
   }
-
-  // Lấy thông tin thiết bị
-  rplidar_response_device_info_t devInfo;
-  if (IS_OK(lidar.getDeviceInfo(devInfo, 1000))) {
-    Serial.printf("[LIDAR] Model: %d | FW: %d.%d | HW: %d\n", devInfo.model,
-                  devInfo.firmware_version >> 8,
-                  devInfo.firmware_version & 0xFF, devInfo.hardware_version);
-  }
-
-  // Bắt đầu quét Express Scan (nếu A1M8 hỗ trợ), fallback sang Standard
-  if (!IS_OK(lidar.startScan(false, 1))) {
-    Serial.println("[LIDAR] Start scan failed!");
-    return false;
-  }
-
-  Serial.println("[LIDAR] RPLidar A1M8 init OK — scanning...");
-  return true;
 }
 
 // Đọc các điểm scan sẵn có trong UART buffer (NON-BLOCKING)
 // Gọi mỗi vòng loop để thu thập dữ liệu
 void lidar_readPoints() {
-  if (!lidarOK)
-    return;
+  // Chỉ đọc nếu Serial1 có dữ liệu sẵn để tránh bị block
+  while (Serial1.available() > 0) {
+    if (IS_OK(lidar.waitPoint(0))) { // Timeout = 0
+      float angle = lidar.getCurrentPoint().angle;
+      float dist = lidar.getCurrentPoint().distance;
+      uint8_t qual = lidar.getCurrentPoint().quality;
 
-  while (IS_OK(lidar.waitPoint())) {
-    float angle = lidar.getCurrentPoint().angle;
-    float dist = lidar.getCurrentPoint().distance;
-    uint8_t qual = lidar.getCurrentPoint().quality;
-
-    if (dist > 0 && qual > 5) { // Bỏ qua điểm không hợp lệ
-      int idx = (int)angle % MAX_SCAN_POINTS;
-      if (idx >= 0 && idx < MAX_SCAN_POINTS) {
-        scanData[idx].angle = angle;
-        scanData[idx].distance = dist;
-        scanData[idx].quality = qual;
-        scanCount = max(scanCount, idx + 1);
+      if (dist > 0 && qual > 0) {
+        int idx = (int)angle % MAX_SCAN_POINTS;
+        if (idx >= 0 && idx < MAX_SCAN_POINTS) {
+          scanData[idx].angle = angle;
+          scanData[idx].distance = dist;
+          scanData[idx].quality = qual;
+          scanCount = max(scanCount, idx + 1);
+        }
       }
+    } else {
+      break; 
     }
   }
 }
@@ -395,6 +381,23 @@ void IRAM_ATTR rightISR() {
   else if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
     invertRightEncoder ? rightTicks++ : rightTicks--;
   lastEncodedRight = encoded;
+}
+
+// ============================================================
+//   WIFI MANAGER CALLBACK
+// ============================================================
+void configModeCallback(WiFiManager *myWiFiManager) {
+  if (oledOK) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("WIFI CONFIG MODE");
+    display.println("AP: AMR_S3_AP");
+    display.println("IP: 192.168.4.1");
+    display.display();
+  }
+  Serial.println("[WIFI] Config mode started");
 }
 
 // ============================================================
@@ -488,11 +491,37 @@ void setup() {
   }
 
   // ── WiFi ─────────────────────────────────────────────────
-  WiFiManager wm;
-  wm.autoConnect("AMR_S3_AP");
-  WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Connecting WiFi...");
+  display.display();
+
+  // Tối ưu WiFi ngay từ đầu để kết nối nhanh hơn
+  WiFi.mode(WIFI_STA);
   esp_wifi_set_ps(WIFI_PS_NONE);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
+  wm.setConnectTimeout(15);      // Đợi WiFi cũ tối đa 15s cho nhanh
+  wm.setConfigPortalTimeout(120); // Nếu phát AP thì cũng chỉ đợi 2 phút
+  wm.setAPCallback(configModeCallback);
+
+  if (!wm.autoConnect("AMR_S3_AP")) {
+    Serial.println("[WIFI] Kết nối thất bại hoặc quá thời gian chờ.");
+    if (oledOK) {
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("WiFi Timeout!");
+      display.println("Starting Lidar...");
+      display.display();
+      delay(2000);
+    }
+  }
+
+  WiFi.setSleep(false);
+
+  // ── RPLidar A1M8 ────────────────────────────────────────
+  // Khởi động LIDAR SAU khi đã có WiFi để tránh sụt áp đột ngột
+  lidarOK = lidar_init();
 
   if (MDNS.begin("amrs3")) {
     MDNS.addService("http", "tcp", 80);
@@ -502,22 +531,8 @@ void setup() {
 
   // ── OTA ──────────────────────────────────────────────────
   ArduinoOTA.setHostname("amr-s3");
-  ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
-  ArduinoOTA.onEnd([]() { Serial.println("\nOTA End"); });
-  ArduinoOTA.onProgress([](unsigned int p, unsigned int t) {
-    Serial.printf("OTA: %u%%\r", (p / (t / 100)));
-  });
-  ArduinoOTA.onError(
-      [](ota_error_t e) { Serial.printf("OTA Error[%u]\n", e); });
   ArduinoOTA.begin();
   TelnetStream.begin();
-
-  // ── RPLidar A1M8 ────────────────────────────────────────
-  lidarOK = lidar_init();
-  if (!lidarOK) {
-    Serial.println("[LIDAR] Init FAILED — running without LiDAR.");
-    lidar_motorStop();
-  }
 
   // ── WebSocket ────────────────────────────────────────────
   webSocket.begin();
@@ -667,6 +682,22 @@ void loop() {
 
   // ── LiDAR: đọc liên tục (non-blocking) ─────────────────
   lidar_readPoints();
+
+  // Retry LiDAR if not OK
+  if (!lidarOK && (millis() - lastLidarRetry > 5000)) {
+    lastLidarRetry = millis();
+    Serial.println("[LIDAR] Retrying... Stop then Start.");
+    lidar.stop();
+    delay(500);
+    
+    u_result res = lidar.startScan(false, 2000);
+    if (IS_OK(res)) {
+      lidarOK = true;
+      Serial.println("[LIDAR] LiDAR RECOVERED! Scanning started.");
+    } else {
+      Serial.printf("[LIDAR] Retry failed. Result code: %x\n", res);
+    }
+  }
 
   // ═══════════════════════════════════════════════════════
   //   Control Loop: 50Hz
@@ -850,6 +881,11 @@ void loop() {
                 : "READY");
         display.display();
       }
+
+      Serial.printf("[AMR] Enc:%ld,%ld V:%.1f,%.1f IMU:%s Lidar:%s Bat:%d%% | X:%.1f Y:%.1f H:%.1f\n", 
+                    cL, cR, vL_meas, vR_meas, 
+                    imuAvailable ? "OK" : "--", lidarOK ? "OK" : "--", 
+                    battPct, robotX, robotY, robotTheta * 180.0f / PI);
 
       TelnetStream.printf("L:%ld R:%ld | vL:%.1f vR:%.1f | θ:%.1f° LiDAR:%s\n",
                           cL, cR, vL_meas, vR_meas, fusedTheta * 180.0f / PI,
