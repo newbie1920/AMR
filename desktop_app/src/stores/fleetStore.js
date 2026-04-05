@@ -521,6 +521,117 @@ const useFleetStore = create(
                 set(state => ({
                     robots: state.robots.map(r => r.id === robotId ? { ...r, accumulatedMap: [] } : r)
                 }));
+                // Also clear from robotStore
+                import('./robotStore').then(mod => {
+                    const rState = mod.useRobotStore.getState();
+                    if (rState.robots[robotId]) {
+                        mod.useRobotStore.setState(state => ({
+                            robots: { ...state.robots, [robotId]: { ...state.robots[robotId], accumulatedMap: [] } }
+                        }));
+                    }
+                });
+            },
+
+            saveMap: (robotId, mapName) => {
+                const robot = get().robots.find(r => r.id === robotId);
+                if (!robot) return false;
+                
+                // Get points from robotStore (live data) first, fallback to fleetStore
+                let points = robot.accumulatedMap || [];
+                try {
+                    const rStore = require('./robotStore').useRobotStore;
+                    const liveRobot = rStore.getState().robots[robotId];
+                    if (liveRobot?.accumulatedMap?.length > 0) {
+                        points = liveRobot.accumulatedMap;
+                    }
+                } catch(e) {}
+                
+                if (points.length === 0) {
+                    console.warn('[FleetStore] No map points to save');
+                    return false;
+                }
+
+                const mapData = {
+                    name: mapName || `Map_${new Date().toISOString().slice(0,16).replace(/[:T]/g, '-')}`,
+                    robotId,
+                    timestamp: Date.now(),
+                    pointCount: points.length,
+                    points: points.map(p => ({ x: +p.x.toFixed(3), y: +p.y.toFixed(3) })), // Compress precision
+                };
+
+                // Save to localStorage
+                const savedMaps = JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
+                savedMaps.push(mapData);
+                // Keep max 10 maps
+                while (savedMaps.length > 10) savedMaps.shift();
+                localStorage.setItem('amr_saved_maps', JSON.stringify(savedMaps));
+                
+                console.log(`[FleetStore] Map saved: "${mapData.name}" (${points.length} points)`);
+                return true;
+            },
+
+            loadMap: (mapIndex) => {
+                const savedMaps = JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
+                if (mapIndex < 0 || mapIndex >= savedMaps.length) return null;
+                const mapData = savedMaps[mapIndex];
+                
+                // Load into the robot state
+                const robotId = mapData.robotId || get().selectedRobotId;
+                set(state => ({
+                    robots: state.robots.map(r => r.id === robotId 
+                        ? { ...r, accumulatedMap: mapData.points } 
+                        : r
+                    )
+                }));
+                
+                // Also set in robotStore
+                import('./robotStore').then(mod => {
+                    mod.useRobotStore.setState(state => ({
+                        robots: { 
+                            ...state.robots, 
+                            [robotId]: { ...state.robots[robotId], accumulatedMap: mapData.points } 
+                        }
+                    }));
+                });
+                
+                console.log(`[FleetStore] Map loaded: "${mapData.name}" (${mapData.points.length} points)`);
+                return mapData;
+            },
+
+            getSavedMaps: () => {
+                return JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
+            },
+
+            deleteSavedMap: (mapIndex) => {
+                const savedMaps = JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
+                if (mapIndex >= 0 && mapIndex < savedMaps.length) {
+                    savedMaps.splice(mapIndex, 1);
+                    localStorage.setItem('amr_saved_maps', JSON.stringify(savedMaps));
+                }
+            },
+
+            exportMapToFile: (robotId) => {
+                const robot = get().robots.find(r => r.id === robotId);
+                let points = robot?.accumulatedMap || [];
+                try {
+                    const rStore = require('./robotStore').useRobotStore;
+                    const liveRobot = rStore.getState().robots[robotId];
+                    if (liveRobot?.accumulatedMap?.length > 0) points = liveRobot.accumulatedMap;
+                } catch(e) {}
+                
+                const mapData = {
+                    name: `AMR_Map_${new Date().toISOString().slice(0,10)}`,
+                    timestamp: Date.now(),
+                    pointCount: points.length,
+                    points: points.map(p => ({ x: +p.x.toFixed(3), y: +p.y.toFixed(3) })),
+                };
+                const blob = new Blob([JSON.stringify(mapData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${mapData.name}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
             },
 
             clearTraveledPath: (robotId) => {

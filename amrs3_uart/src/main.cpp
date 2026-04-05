@@ -92,9 +92,9 @@ Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 // Dùng UART1 (Serial1) của ESP32-S3
 // CHÚ Ý: ESP32-S3-N16R8 sử dụng Octal PSRAM (OPI), các chân 33, 34, 35, 36, 37
 // được dùng nội bộ cho bộ nhớ PSRAM này. Tuyệt đối không dùng cho UART.
-#define LIDAR_SERIAL_RX 15 
-#define LIDAR_SERIAL_TX 16 
-#define LIDAR_MOTOR_PIN 21 
+#define LIDAR_SERIAL_RX 15
+#define LIDAR_SERIAL_TX 16
+#define LIDAR_MOTOR_PIN 21
 #define LIDAR_BAUDRATE 115200
 
 RPLidar lidar; // Đối tượng RPLidar (thư viện robopeak/RPLidar)
@@ -116,7 +116,8 @@ unsigned long lastScanBroadcast = 0;
 #define MPU6050_ADDR 0x68
 
 // ─── BATTERY CALIBRATION ─────────────────────────────────────────────────────
-#define BATT_SCALE_FACTOR 2.0f // Tỉ lệ phân áp (bạn có thể cần chỉnh lại theo phần cứng)
+#define BATT_SCALE_FACTOR                                                      \
+  2.0f // Tỉ lệ phân áp (bạn có thể cần chỉnh lại theo phần cứng)
 #define BATT_OFFSET 0.0f
 #define BATT_MIN_V 6.6f
 #define BATT_MAX_V 8.4f
@@ -284,31 +285,50 @@ void lidar_motorStop() { digitalWrite(LIDAR_MOTOR_PIN, LOW); }
 bool lidar_init() {
   Serial.println("[LIDAR] Starting initialization...");
   
-  // Khởi động Serial1 cho LiDAR
+  // Đảm bảo LiDAR ở trạng thái dừng và sạch buffer trước khi bắt đầu
+  lidar.stop();
+  delay(100);
+  
+  // Cấu hình Serial1 (Gọi setRxBufferSize TRƯỚC begin trên ESP32)
+  Serial1.setRxBufferSize(2048); 
   Serial1.begin(LIDAR_BAUDRATE, SERIAL_8N1, LIDAR_SERIAL_RX, LIDAR_SERIAL_TX);
   lidar.begin(Serial1);
 
-  // BẬT MOTOR NGAY LẬP TỨC VÀ KHÔNG TẮT
+  // BẬT MOTOR
   lidar_motorStart();
-  Serial.println("[LIDAR] Motor is ON.");
+  Serial.println("[LIDAR] Motor is ON, waiting 1500ms for spin-up...");
+  delay(1500); 
   
-  // Thử khởi động scan lần đầu - Tăng thời gian chờ lên 2s cho motor ổn định
-  u_result res = lidar.startScan(false, 2000);
+  // Xóa buffer rác sinh ra trong lúc khởi động motor
+  while (Serial1.available()) Serial1.read();
+  
+  // Kiểm tra sức khỏe LiDAR
+  rplidar_response_device_health_t health;
+  u_result healthRes = lidar.getHealth(health);
+  if (IS_OK(healthRes)) {
+    Serial.printf("[LIDAR] Health status: %d (Error: %d)\n", health.status, health.error_code);
+    if (health.status == 2) { // Status 2 = Error
+      Serial.println("[LIDAR] Warning: Device error detected.");
+      // lidardrv.reset() is not supported in this fork
+    }
+  } else {
+    Serial.printf("[LIDAR] Could not get health: 0x%08X\n", healthRes);
+  }
+  
+  // Khởi động scan
+  u_result res = lidar.startScan(false, 3000); // Tăng timeout lên 3s
   if (IS_OK(res)) {
-    Serial.println("[LIDAR] Initial scan started.");
+    Serial.println("[LIDAR] Initial scan started successfully.");
     return true;
   } else {
-    Serial.println("[LIDAR] Initial scan failed — will retry in loop().");
-    return false; // Loop() sẽ tiếp quản việc retry
+    Serial.printf("[LIDAR] Initial scan failed: 0x%08X.\n", res);
+    return false;
   }
 }
 
-// Đọc các điểm scan sẵn có trong UART buffer (NON-BLOCKING)
-// Gọi mỗi vòng loop để thu thập dữ liệu
 void lidar_readPoints() {
-  // Chỉ đọc nếu Serial1 có dữ liệu sẵn để tránh bị block
   while (Serial1.available() > 0) {
-    if (IS_OK(lidar.waitPoint(0))) { // Timeout = 0
+    if (IS_OK(lidar.waitPoint(0))) { // Revert về timeout = 0 như bản cũ của bạn
       float angle = lidar.getCurrentPoint().angle;
       float dist = lidar.getCurrentPoint().distance;
       uint8_t qual = lidar.getCurrentPoint().quality;
@@ -323,27 +343,24 @@ void lidar_readPoints() {
         }
       }
     } else {
-      break; 
+      break;
     }
   }
 }
 
-// Gửi dữ liệu LiDAR qua WebSocket (dạng nén mảng float)
-// Gửi 3Hz để không làm nghẽn băng thông
+
 void lidar_broadcast() {
   if (!lidarOK || scanCount == 0)
     return;
   if (millis() - lastScanBroadcast < 333)
-    return; // ~3Hz
+    return; // ~3Hz (Logic gốc)
   lastScanBroadcast = millis();
 
-  // Tạo JSON dạng gọn: {"lidar":[angle,dist, angle,dist, ...]}
-  // Giới hạn 180 điểm mỗi lần để không quá tải WebSocket
   JsonDocument doc;
   doc["lidar"] = true;
   JsonArray arr = doc["pts"].to<JsonArray>();
 
-  int step = max(1, scanCount / 180); // Lấy mẫu nếu quá nhiều
+  int step = max(1, scanCount / 180); 
   for (int i = 0; i < scanCount; i += step) {
     if (scanData[i].distance > 0 && scanData[i].quality > 5) {
       arr.add((int)scanData[i].angle);
@@ -353,7 +370,7 @@ void lidar_broadcast() {
 
   String out;
   serializeJson(doc, out);
-  webSocket.broadcastTXT(out);
+  webSocket.broadcastTXT(out.c_str()); // Dùng .c_str() để tránh lỗi Syntax
 }
 
 // ============================================================
@@ -501,7 +518,7 @@ void setup() {
   esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
-  wm.setConnectTimeout(15);      // Đợi WiFi cũ tối đa 15s cho nhanh
+  wm.setConnectTimeout(15);       // Đợi WiFi cũ tối đa 15s cho nhanh
   wm.setConfigPortalTimeout(120); // Nếu phát AP thì cũng chỉ đợi 2 phút
   wm.setAPCallback(configModeCallback);
 
@@ -670,9 +687,14 @@ void setup() {
 //   MAIN LOOP
 // ============================================================
 void loop() {
+  yield(); // Nhường CPU cho WiFi stack — QUAN TRỌNG để tránh mất kết nối
   ArduinoOTA.handle();
   webSocket.loop();
   server.handleClient();
+
+  // Gửi LiDAR scan độc lập với Control Loop để tránh gửi chồng chéo với
+  // Telemetry
+  lidar_broadcast();
 
   // ── Safety failsafe (timeout) ──────────────────────────
   if (millis() - lastCmdTime > cmdTimeout) {
@@ -683,19 +705,19 @@ void loop() {
   // ── LiDAR: đọc liên tục (non-blocking) ─────────────────
   lidar_readPoints();
 
-  // Retry LiDAR if not OK
+  // Retry LiDAR
   if (!lidarOK && (millis() - lastLidarRetry > 5000)) {
     lastLidarRetry = millis();
-    Serial.println("[LIDAR] Retrying... Stop then Start.");
+    Serial.println("[LIDAR] Attempting recovery...");
     lidar.stop();
-    delay(500);
+    delay(200);
     
     u_result res = lidar.startScan(false, 2000);
     if (IS_OK(res)) {
       lidarOK = true;
-      Serial.println("[LIDAR] LiDAR RECOVERED! Scanning started.");
+      Serial.println("[LIDAR] RECOVERED!");
     } else {
-      Serial.printf("[LIDAR] Retry failed. Result code: %x\n", res);
+      Serial.printf("[LIDAR] Recovery fail: 0x%08X\n", res);
     }
   }
 
@@ -804,24 +826,22 @@ void loop() {
     setMotor(MOTOR_LEFT_IN1, MOTOR_LEFT_IN2, 0, pwmLeft);
     setMotor(MOTOR_RIGHT_IN3, MOTOR_RIGHT_IN4, 1, pwmRight);
 
-    // ── Telemetry & LiDAR Broadcast (5Hz) ────────────────
-    if (millis() - lastTelemetryTime > 200) {
+    // ── Telemetry & LiDAR Broadcast (4Hz) ────────────────
+    // Giảm từ 5Hz (200ms) xuống 4Hz (250ms) để giảm tải WiFi
+    if (millis() - lastTelemetryTime > 250) {
       lastTelemetryTime = millis();
 
-      // Battery
-      float b_sum = 0;
-      for (int i = 0; i < 10; i++)
-        b_sum += analogRead(BATT_PIN);
-      float v_now =
-          (b_sum / 10.0f / 4095.0f) * 3.3f * BATT_SCALE_FACTOR + BATT_OFFSET;
-      if (fabs(lastPwmLeft) < 20.0f && fabs(lastPwmRight) < 20.0f)
-        filteredVBatt = filteredVBatt * 0.95f + v_now * 0.05f;
-      else
-        filteredVBatt = filteredVBatt * 0.999f + v_now * 0.001f;
+      // Battery logic (Xử lý nhiễu ADC)
+      long b_sum = 0;
+      for (int i = 0; i < 20; i++) b_sum += analogRead(BATT_PIN);
+      float v_now = (b_sum / 20.0f / 4095.0f) * 3.3f * BATT_SCALE_FACTOR + BATT_OFFSET;
+      
+      // Lọc thông thấp cho pin để không bị nhảy số
+      filteredVBatt = filteredVBatt * 0.9f + v_now * 0.1f;
+      if (filteredVBatt < 1.0f) filteredVBatt = v_now; // Reset nếu bắt đầu từ 0
+      
+      int battPct = constrain((int)((filteredVBatt - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V) * 100), 0, 100);
 
-      int battPct = constrain(
-          (int)((filteredVBatt - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V) * 100),
-          0, 100);
 
       JsonDocument telem;
       telem["telem"] = true;
@@ -854,8 +874,7 @@ void loop() {
       serializeJson(telem, out);
       webSocket.broadcastTXT(out);
 
-      // Gửi LiDAR scan (3Hz tự điều tiết bên trong)
-      lidar_broadcast();
+      // LiDAR scan now broadcasts independently in main loop
 
       // ── OLED (1Hz) — only if display present ───────────
       if (oledOK && millis() - lastOledUpdateTime > 1000) {
@@ -882,10 +901,11 @@ void loop() {
         display.display();
       }
 
-      Serial.printf("[AMR] Enc:%ld,%ld V:%.1f,%.1f IMU:%s Lidar:%s Bat:%d%% | X:%.1f Y:%.1f H:%.1f\n", 
-                    cL, cR, vL_meas, vR_meas, 
-                    imuAvailable ? "OK" : "--", lidarOK ? "OK" : "--", 
-                    battPct, robotX, robotY, robotTheta * 180.0f / PI);
+      Serial.printf("[AMR] Enc:%ld,%ld V:%.1f,%.1f IMU:%s Lidar:%s Bat:%d%% | "
+                    "X:%.1f Y:%.1f H:%.1f\n",
+                    cL, cR, vL_meas, vR_meas, imuAvailable ? "OK" : "--",
+                    lidarOK ? "OK" : "--", battPct, robotX, robotY,
+                    robotTheta * 180.0f / PI);
 
       TelnetStream.printf("L:%ld R:%ld | vL:%.1f vR:%.1f | θ:%.1f° LiDAR:%s\n",
                           cL, cR, vL_meas, vR_meas, fusedTheta * 180.0f / PI,

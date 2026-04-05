@@ -24,66 +24,7 @@ const ControlPanel = () => {
     const lang = settings.language || 'en';
     const t = (key) => translations[lang][key] || key;
 
-    // Keyboard control
-    useEffect(() => {
-        const handleKeyDown = (e) => {
-            if (!connected) return;
-
-            const key = e.key.toLowerCase();
-            if (['w', 'a', 's', 'd', 'q', 'e', ' '].includes(key)) {
-                e.preventDefault();
-                setActiveKeys(prev => new Set([...prev, key]));
-            }
-        };
-
-        const handleKeyUp = (e) => {
-            const key = e.key.toLowerCase();
-            setActiveKeys(prev => {
-                const next = new Set(prev);
-                next.delete(key);
-                return next;
-            });
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('keyup', handleKeyUp);
-
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('keyup', handleKeyUp);
-        };
-    }, [connected]);
-
-    // Send velocity commands based on active keys
-    useEffect(() => {
-        if (!connected) {
-            clearInterval(intervalRef.current);
-            return;
-        }
-
-        const sendCommand = () => {
-            let linear = 0;
-            let angular = 0;
-
-            if (activeKeys.has('w')) linear += linearSpeed;
-            if (activeKeys.has('s')) linear -= linearSpeed;
-            if (activeKeys.has('a')) angular += angularSpeed;
-            if (activeKeys.has('d')) angular -= angularSpeed;
-            if (activeKeys.has('q')) { linear += linearSpeed * 0.7; angular += angularSpeed * 0.7; }
-            if (activeKeys.has('e')) { linear += linearSpeed * 0.7; angular -= angularSpeed * 0.7; }
-            if (activeKeys.has(' ')) { linear = 0; angular = 0; stopRobot(); return; }
-
-            if (linear !== 0 || angular !== 0) {
-                sendVelocity(linear, angular);
-            } else if (activeKeys.size === 0) {
-                stopRobot();
-            }
-        };
-
-        intervalRef.current = setInterval(sendCommand, 100);
-
-        return () => clearInterval(intervalRef.current);
-    }, [connected, activeKeys, linearSpeed, angularSpeed, sendVelocity, stopRobot]);
+    // Keyboard control has been moved to App.jsx to prevent duplicate events overloading the ESP32 WebSocket
 
     const handleJoystickButton = useCallback((linear, angular, isPressed) => {
         if (!connected) return;

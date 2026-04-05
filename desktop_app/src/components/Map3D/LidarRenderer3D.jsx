@@ -6,52 +6,54 @@ const LidarRenderer3D = ({ robot, showAccumulated = true }) => {
     const accumulatedPoints = robot.accumulatedMap || [];
     const robotPose = robot.pose || { x: 0, y: 0, theta: 0 };
 
-    // Real-time scan geometry
+    // Real-time scan geometry (red dots showing current LiDAR sweep)
     const scanGeometry = useMemo(() => {
         if (points.length === 0) return null;
-        const positions = new Float32Array(points.length * 3);
-        points.forEach((point, i) => {
+        // Filter valid points
+        const validPoints = points.filter(p => p.distance > 0.05 && p.distance < 6.0);
+        if (validPoints.length === 0) return null;
+        
+        const positions = new Float32Array(validPoints.length * 3);
+        validPoints.forEach((point, i) => {
             const angleRad = (point.angle * Math.PI) / 180 + robotPose.theta;
-            const lidarX_2D = robotPose.x + point.distance * Math.cos(angleRad);
-            const lidarY_2D = robotPose.y + point.distance * Math.sin(angleRad);
-            const x = lidarX_2D;
-            const z = -lidarY_2D; // Map Y to -Z to match Robot3D
-            positions[i * 3] = x;
-            positions[i * 3 + 1] = 0.15;
-            positions[i * 3 + 2] = z;
+            const wx = robotPose.x + point.distance * Math.cos(angleRad);
+            const wy = robotPose.y + point.distance * Math.sin(angleRad);
+            positions[i * 3] = wx;
+            positions[i * 3 + 1] = 0.15; // Slightly above ground
+            positions[i * 3 + 2] = -wy;  // Map Y to -Z (Three.js coord)
         });
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         return geo;
     }, [points, robotPose]);
 
-    // Accumulated map geometry
+    // Accumulated map geometry (green dots showing built map)
     const mapGeometry = useMemo(() => {
         if (accumulatedPoints.length === 0) return null;
         const positions = new Float32Array(accumulatedPoints.length * 3);
         accumulatedPoints.forEach((point, i) => {
             positions[i * 3] = point.x;
-            positions[i * 3 + 1] = 0.1;
-            positions[i * 3 + 2] = -point.y || -point.z; // Handle both y and z fields for accumulated points
+            positions[i * 3 + 1] = 0.08;
+            positions[i * 3 + 2] = -(point.y ?? point.z ?? 0);
         });
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         return geo;
-    }, [accumulatedPoints]);
+    }, [accumulatedPoints, accumulatedPoints.length]);
 
     return (
         <group>
             {/* Real-time scan (Bright Red) */}
             {scanGeometry && (
                 <points geometry={scanGeometry}>
-                    <pointsMaterial color="#ff3333" size={0.06} sizeAttenuation={true} transparent opacity={0.9} />
+                    <pointsMaterial color="#ff4444" size={0.08} sizeAttenuation={true} transparent opacity={0.9} />
                 </points>
             )}
 
-            {/* Accumulated map (Faded Blue/Cyan) */}
+            {/* Accumulated map (Green — the actual built map) */}
             {showAccumulated && mapGeometry && (
                 <points geometry={mapGeometry}>
-                    <pointsMaterial color="#44ffaa" size={0.04} sizeAttenuation={true} transparent opacity={0.4} />
+                    <pointsMaterial color="#4ade80" size={0.05} sizeAttenuation={true} transparent opacity={0.6} />
                 </points>
             )}
         </group>

@@ -89,26 +89,45 @@ ipcMain.on('start-monitor', (event, { ip, robotId }) => {
     telnetSocket = new net.Socket();
     
     telnetSocket.connect(23, ip, () => {
-        event.sender.send('monitor-status', { status: 'connected', robotId, file: logPath });
+        if (!event.sender.isDestroyed()) {
+            event.sender.send('monitor-status', { status: 'connected', robotId, file: logPath });
+        }
+    });
+
+    event.sender.once('destroyed', () => {
+        if (telnetSocket) {
+            telnetSocket.destroy();
+            telnetSocket = null;
+        }
+        if (logStream) {
+            logStream.end();
+            logStream = null;
+        }
     });
     
     telnetSocket.on('data', (data) => {
         const text = data.toString();
         if (logStream) logStream.write(text);
-        event.sender.send('monitor-data', text);
+        if (!event.sender.isDestroyed()) {
+            event.sender.send('monitor-data', text);
+        }
     });
     
     telnetSocket.on('error', (err) => {
         const errorMsg = `\n[Error] ${err.message}\n`;
         if (logStream) logStream.write(errorMsg);
-        event.sender.send('monitor-data', errorMsg);
-        event.sender.send('monitor-status', { status: 'error', robotId, error: err.message });
+        if (!event.sender.isDestroyed()) {
+            event.sender.send('monitor-data', errorMsg);
+            event.sender.send('monitor-status', { status: 'error', robotId, error: err.message });
+        }
     });
     
     telnetSocket.on('close', () => {
         const closeMsg = `\n--- Connection Closed ---\n`;
         if (logStream) logStream.write(closeMsg);
-        event.sender.send('monitor-status', { status: 'disconnected', robotId });
+        if (!event.sender.isDestroyed()) {
+            event.sender.send('monitor-status', { status: 'disconnected', robotId });
+        }
     });
 });
 

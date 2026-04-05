@@ -184,13 +184,60 @@ const useRobotStore = create((set, get) => {
             }));
 
             // --- LiDAR Data ---
+            // Grid-based dedup set for mapping (5cm resolution)
+            const GRID_RES = 0.05; // 5cm grid
+            const _mapGridSet = new Set();
+            
             robotSubs.push(robotBridge.subscribe(robotId, MSG.LIDAR, (msg) => {
-                set(state => ({
-                    robots: {
-                        ...state.robots,
-                        [robotId]: { ...state.robots[robotId], lidarData: msg.points || [] }
+                const fleetState = useFleetStore.getState();
+                const isMapping = fleetState.settings.isMapping;
+
+                set(state => {
+                    const robot = state.robots[robotId];
+                    if (!robot) return state;
+
+                    let newAccumulatedMap = robot.accumulatedMap || [];
+                    if (isMapping && msg.points && msg.points.length > 0) {
+                        const pose = robot.pose || { x: 0, y: 0, theta: 0 };
+                        const worldPoints = [];
+                        for (const p of msg.points) {
+                            if (p.distance > 0.05 && p.distance < 6.0 && p.quality !== 0) {
+                                const angleRad = (p.angle * Math.PI) / 180 + pose.theta;
+                                const wx = pose.x + p.distance * Math.cos(angleRad);
+                                const wy = pose.y + p.distance * Math.sin(angleRad);
+                                
+                                // Grid-based deduplication: skip if this cell already has a point
+                                const gx = Math.round(wx / GRID_RES);
+                                const gy = Math.round(wy / GRID_RES);
+                                const gridKey = gx + ',' + gy;
+                                if (!_mapGridSet.has(gridKey)) {
+                                    _mapGridSet.add(gridKey);
+                                    worldPoints.push({ x: wx, y: wy });
+                                }
+                            }
+                        }
+                        
+                        if (worldPoints.length > 0) {
+                            newAccumulatedMap = [...newAccumulatedMap, ...worldPoints];
+                        }
+                        
+                        // Hard cap at 50000 unique grid cells
+                        if (newAccumulatedMap.length > 50000) {
+                            newAccumulatedMap = newAccumulatedMap.slice(newAccumulatedMap.length - 50000);
+                        }
                     }
-                }));
+
+                    return {
+                        robots: {
+                            ...state.robots,
+                            [robotId]: {
+                                ...robot,
+                                lidarData: msg.points || [],
+                                accumulatedMap: newAccumulatedMap
+                            }
+                        }
+                    };
+                });
             }));
 
             // --- Connection Lifecycle ---

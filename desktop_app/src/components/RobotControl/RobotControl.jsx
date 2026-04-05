@@ -317,6 +317,43 @@ const RobotControl = () => {
                     >
                         {settings.isMapping ? `🗺️ ${t('mapping_on')}` : `🗺️ ${t('start_mapping')}`}
                     </button>
+                    {/* Auto Explore toggled with isMapping usually, but here is a dedicated button */}
+                    <button
+                        className={`btn btn-sm ${window.exploreActive ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ border: window.exploreActive ? 'none' : '1px solid #3b82f6', color: window.exploreActive ? '#fff' : '#3b82f6' }}
+                        onClick={() => {
+                            if (window.exploreActive) {
+                                clearInterval(window.exploreInterval);
+                                window.exploreActive = false;
+                                stopRobot(selectedRobotId);
+                            } else {
+                                window.exploreActive = true;
+                                if (!settings.isMapping) updateSettings({ isMapping: true });
+                                
+                                // Auto-drive logic
+                                window.exploreInterval = setInterval(async () => {
+                                    const storeModule = await import('../../stores/robotStore');
+                                    const rStore = storeModule.useRobotStore.getState();
+                                    const bm = rStore.getBehaviorManager(selectedRobotId);
+                                    const robotState = rStore.robots[selectedRobotId];
+                                    
+                                    if (bm && robotState && !robotState.isNavigating) {
+                                        const rPose = robotState.pose || {x:7.5, y:7.5, theta:0};
+                                        const randomGoal = {
+                                            x: rPose.x + (Math.random() - 0.5) * 4,
+                                            y: rPose.y + (Math.random() - 0.5) * 4,
+                                            theta: 0
+                                        };
+                                        bm.navigateTo(randomGoal);
+                                    }
+                                }, 3000);
+                            }
+                            // Force re-render Hack
+                            setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 100);
+                        }}
+                    >
+                        {window.exploreActive ? `🚀 Đang Tự Chạy` : `🚀 Tự Chạy Dò Map`}
+                    </button>
                     {settings.isMapping && (
                         <button
                             className="btn btn-sm btn-ghost"

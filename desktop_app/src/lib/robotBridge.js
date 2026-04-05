@@ -41,6 +41,7 @@ export const MSG = {
     CMD_VEL: 'cmd_vel',
     CONFIG: 'config',
     CMD: 'cmd',
+    LIDAR: 'lidar',
 };
 
 // ─── Default config ────────────────────────────────────────────────────────────
@@ -238,6 +239,18 @@ class RobotBridge {
                 this._handleStatus(robotId, msg);
                 break;
 
+            case MSG.LIDAR:
+                if (msg.pts && !msg.points) {
+                    msg.points = [];
+                    for(let i=0; i<msg.pts.length; i+=2) {
+                        msg.points.push({
+                            angle: msg.pts[i],
+                            distance: msg.pts[i+1] / 1000.0 // convert mm to m
+                        });
+                    }
+                }
+                break;
+
             default:
                 // Unknown message type — pass through to listeners anyway
                 break;
@@ -251,6 +264,7 @@ class RobotBridge {
     _inferLegacyType(msg) {
         if (msg.telem === true || (msg.x !== undefined && msg.theta !== undefined)) return MSG.TELEM;
         if (msg.uptime !== undefined || msg.wifi_rssi !== undefined) return MSG.STATUS;
+        if (msg.lidar === true || msg.pts !== undefined) return MSG.LIDAR;
         return 'unknown';
     }
 

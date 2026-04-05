@@ -120,12 +120,25 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
         selectedRobotId,
         selectRobot,
         settings,
+        updateSettings,
+        clearMap,
+        saveMap,
+        loadMap,
+        getSavedMaps,
+        exportMapToFile,
     } = useFleetStore();
 
     // Get basic fleet data
     const fleetRobots = useFleetStore(state => state.robots);
     // Get live telemetry data
     const liveRobots = useRobotStore(state => state.robots);
+    
+    const stopRobot = () => {
+        import('../../stores/robotStore').then(mod => {
+            mod.useRobotStore.getState().stopMission(selectedRobotId);
+            mod.useRobotStore.getState().sendVelocity(selectedRobotId, 0, 0);
+        });
+    };
 
     // Merge fleet data (name, color) with live data (pose, connected)
     const robots = useMemo(() => {
@@ -148,12 +161,21 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
     const { missions } = useMissionStore();
 
     const [viewMode, setViewMode] = useState('isometric'); // Start with 3D view
+    const [mapSource, setMapSource] = useState('mock'); // 'mock' or 'slam'
     const [showGrid, setShowGrid] = useState(true);
     const [showPaths, setShowPaths] = useState(true);
     const [showLidar, setShowLidar] = useState(true);
     const [showSlam, setShowSlam] = useState(true);
     const [showGlobalMap, setShowGlobalMap] = useState(false);
     const [globalMap, setGlobalMap] = useState(null);
+    const [showSaveDialog, setShowSaveDialog] = useState(false);
+    const [mapName, setMapName] = useState('');
+    const [showMapList, setShowMapList] = useState(false);
+    const [mapSaveMsg, setMapSaveMsg] = useState('');
+    
+    // Get current robot's accumulated point count for display
+    const currentRobot = robots.find(r => r.id === selectedRobotId);
+    const mapPointCount = currentRobot?.accumulatedMap?.length || 0;
 
     // Initial camera preset
     useEffect(() => {
@@ -268,13 +290,21 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                     {/* Environment */}
                     <fog attach="fog" args={['#0a0a1a', 30, 60]} />
 
-                    {/* Warehouse Floor & Zones */}
-                    <WarehouseFloor
-                        size={Math.max(WAREHOUSE_WIDTH, WAREHOUSE_HEIGHT)}
-                        showGrid={showGrid}
-                        onFloorClick={handleFloorClick}
-                        isSelectingWaypoint={isSelectingWaypoint}
-                    />
+                    {/* Conditional rendering based on mapSource */}
+                    {mapSource === 'mock' ? (
+                        <WarehouseFloor
+                            size={Math.max(WAREHOUSE_WIDTH, WAREHOUSE_HEIGHT)}
+                            showGrid={showGrid}
+                            onFloorClick={handleFloorClick}
+                            isSelectingWaypoint={isSelectingWaypoint}
+                        />
+                    ) : (
+                        showGrid && (
+                            <group position={[WAREHOUSE_WIDTH / 2, 0.01, -WAREHOUSE_HEIGHT / 2]}>
+                                <gridHelper args={[Math.max(WAREHOUSE_WIDTH, WAREHOUSE_HEIGHT) * 1.5, Math.max(WAREHOUSE_WIDTH, WAREHOUSE_HEIGHT) * 1.5, '#2a2a4a', '#1a1a3a']} />
+                            </group>
+                        )
+                    )}
 
                     {/* Robots */}
                     {robots.map(robot => (
@@ -296,20 +326,25 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                         />
                     ))}
 
-                    {/* LiDAR Points */}
-                    {showLidar && robots.map(robot => (
-                        <LidarRenderer3D
-                            key={`lidar-${robot.id}`}
-                            robot={robot}
-                        />
-                    ))}
+                    {/* SLAM Specific Renderers */}
+                    {mapSource === 'slam' && (
+                        <>
+                            {/* LiDAR Points */}
+                            {showLidar && robots.map(robot => (
+                                <LidarRenderer3D
+                                    key={`lidar-${robot.id}`}
+                                    robot={robot}
+                                />
+                            ))}
 
-                    {/* SLAM Map Layer (Local) */}
-                    {showSlam && slamMap && (
-                        <OccupancyGrid3D grid={slamMap} opacity={0.6} yOffset={0.02} color="#4ade80" />
+                            {/* SLAM Map Layer (Local) */}
+                            {showSlam && slamMap && (
+                                <OccupancyGrid3D grid={slamMap} opacity={0.6} yOffset={0.02} color="#4ade80" />
+                            )}
+                        </>
                     )}
 
-                    {/* Global Map Layer (Cloud) */}
+                    {/* Global Map Layer (Cloud - can be shown on both theoretically but usually SLAM) */}
                     {showGlobalMap && globalMap && (
                         <OccupancyGrid3D grid={globalMap} opacity={0.4} yOffset={0.01} color="#3b82f6" />
                     )}
@@ -318,6 +353,25 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
 
             {/* Controls Overlay */}
             <div className="map3d-controls">
+                <div className="source-controls view-controls" style={{ flexDirection: 'row' }}>
+                    <button
+                        className={`control-btn ${mapSource === 'mock' ? 'active' : ''}`}
+                        onClick={() => setMapSource('mock')}
+                        title="Map Giả Lập"
+                        style={{ width: 'auto', padding: '0 8px' }}
+                    >
+                        Map Giả
+                    </button>
+                    <button
+                        className={`control-btn ${mapSource === 'slam' ? 'active' : ''}`}
+                        onClick={() => setMapSource('slam')}
+                        title="Map Vẽ (SLAM)"
+                        style={{ width: 'auto', padding: '0 8px' }}
+                    >
+                        Map Xe Vẽ
+                    </button>
+                </div>
+                
                 <div className="view-controls">
                     {viewModes.map(mode => (
                         <button
@@ -370,6 +424,253 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                     </button>
                 </div>
             </div>
+
+            {/* SLAM Mapping Control Panel */}
+            {mapSource === 'slam' && (
+                <div className="slam-mapping-panel" style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 10,
+                    background: 'rgba(10, 10, 26, 0.92)',
+                    backdropFilter: 'blur(12px)',
+                    padding: '10px 16px',
+                    borderRadius: '16px',
+                    border: `1px solid ${settings.isMapping ? 'rgba(239, 68, 68, 0.5)' : 'rgba(74, 222, 128, 0.3)'}`,
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                    minWidth: '320px',
+                }}>
+                    {/* Top row: main controls */}
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                            style={{
+                                padding: '5px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                                border: 'none', color: '#fff',
+                                background: settings.isMapping 
+                                    ? 'linear-gradient(135deg, #ef4444, #dc2626)' 
+                                    : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                                boxShadow: settings.isMapping ? '0 0 12px rgba(239,68,68,0.4)' : '0 0 12px rgba(34,197,94,0.3)',
+                                animation: settings.isMapping ? 'pulse 2s infinite' : 'none',
+                            }}
+                            onClick={() => {
+                                if (settings.isMapping) {
+                                    // Stop mapping
+                                    updateSettings({ isMapping: false });
+                                    if (window.exploreActive) {
+                                        clearInterval(window.exploreInterval);
+                                        window.exploreActive = false;
+                                        stopRobot();
+                                    }
+                                } else {
+                                    updateSettings({ isMapping: true });
+                                }
+                            }}
+                        >
+                            {settings.isMapping ? '⏹ Dừng Vẽ' : '▶ Bắt Đầu Vẽ Map'}
+                        </button>
+                        
+                        {settings.isMapping && (
+                            <button
+                                style={{
+                                    padding: '5px 12px', borderRadius: '12px', fontSize: '11px', cursor: 'pointer',
+                                    border: window.exploreActive ? 'none' : '1px solid rgba(59,130,246,0.5)',
+                                    color: '#fff',
+                                    background: window.exploreActive ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
+                                }}
+                                onClick={() => {
+                                    if (window.exploreActive) {
+                                        clearInterval(window.exploreInterval);
+                                        window.exploreActive = false;
+                                        stopRobot();
+                                    } else {
+                                        window.exploreActive = true;
+                                        // Direct cmd_vel explore: simple wall-follow behavior
+                                        // Instead of NavController (needs costmap), directly send velocity commands
+                                        // based on LiDAR data to avoid obstacles
+                                        window.exploreInterval = setInterval(async () => {
+                                            const storeModule = await import('../../stores/robotStore');
+                                            const rStore = storeModule.useRobotStore.getState();
+                                            const robotState = rStore.robots[selectedRobotId];
+                                            if (!robotState || !robotState.connected) return;
+                                            
+                                            const lidar = robotState.lidarData || [];
+                                            
+                                            // Analyze LiDAR: find min distance in front (±45°) and sides
+                                            let frontMin = 99, leftMin = 99, rightMin = 99;
+                                            for (const p of lidar) {
+                                                if (!p || p.distance <= 0.05 || p.distance > 4) continue;
+                                                const a = p.angle % 360;
+                                                if (a < 45 || a > 315) frontMin = Math.min(frontMin, p.distance);
+                                                else if (a >= 45 && a < 135) rightMin = Math.min(rightMin, p.distance);
+                                                else if (a >= 225 && a < 315) leftMin = Math.min(leftMin, p.distance);
+                                            }
+                                            
+                                            let linear = 0.15; // Default: go forward slowly
+                                            let angular = 0;
+                                            
+                                            if (frontMin < 0.35) {
+                                                // Too close to wall ahead — stop and rotate
+                                                linear = 0;
+                                                angular = leftMin > rightMin ? 0.8 : -0.8;
+                                            } else if (frontMin < 0.6) {
+                                                // Getting close — slow down and start turning
+                                                linear = 0.08;
+                                                angular = leftMin > rightMin ? 0.5 : -0.5;
+                                            } else {
+                                                // Open space — go forward with slight drift to explore
+                                                linear = 0.18;
+                                                // Slight random drift to cover more area
+                                                angular = (Math.random() - 0.5) * 0.3;
+                                            }
+                                            
+                                            rStore.sendVelocity(selectedRobotId, linear, angular);
+                                        }, 300); // 3.3Hz control loop
+                                    }
+                                    setMapSource(s => s); // force re-render
+                                }}
+                            >
+                                {window.exploreActive ? '🧠 Đang Tự Chạy' : '🚀 Tự Chạy Dò'}
+                            </button>
+                        )}
+
+                        {/* Point counter */}
+                        <span style={{
+                            fontSize: '11px', color: '#a78bfa', fontFamily: 'monospace',
+                            background: 'rgba(139, 92, 246, 0.15)', padding: '3px 8px', borderRadius: '8px',
+                        }}>
+                            📍 {mapPointCount.toLocaleString()} pts
+                        </span>
+                    </div>
+
+                    {/* Bottom row: save/load/clear */}
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', flexWrap: 'wrap' }}>
+                        {/* Save Map */}
+                        {!showSaveDialog ? (
+                            <button
+                                style={{
+                                    padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
+                                    border: '1px solid rgba(250,204,21,0.4)', color: '#fbbf24', background: 'transparent',
+                                }}
+                                onClick={() => { setShowSaveDialog(true); setMapName(`Map_${new Date().toLocaleTimeString('vi')}`); }}
+                                disabled={mapPointCount === 0}
+                                title={mapPointCount === 0 ? 'Chưa có điểm nào để lưu' : 'Lưu bản đồ'}
+                            >
+                                💾 Lưu Map
+                            </button>
+                        ) : (
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                <input
+                                    type="text"
+                                    value={mapName}
+                                    onChange={e => setMapName(e.target.value)}
+                                    style={{
+                                        width: '120px', padding: '3px 6px', borderRadius: '8px', fontSize: '11px',
+                                        border: '1px solid rgba(250,204,21,0.4)', background: 'rgba(0,0,0,0.3)', color: '#fff',
+                                    }}
+                                    placeholder="Tên map..."
+                                    autoFocus
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                            saveMap(selectedRobotId, mapName);
+                                            setShowSaveDialog(false);
+                                            setMapSaveMsg('✅ Đã lưu!');
+                                            setTimeout(() => setMapSaveMsg(''), 2000);
+                                        }
+                                    }}
+                                />
+                                <button
+                                    style={{ padding: '3px 8px', borderRadius: '8px', fontSize: '11px', border: 'none', background: '#fbbf24', color: '#000', cursor: 'pointer' }}
+                                    onClick={() => {
+                                        saveMap(selectedRobotId, mapName);
+                                        setShowSaveDialog(false);
+                                        setMapSaveMsg('✅ Đã lưu!');
+                                        setTimeout(() => setMapSaveMsg(''), 2000);
+                                    }}
+                                >✓</button>
+                                <button
+                                    style={{ padding: '3px 6px', borderRadius: '8px', fontSize: '11px', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#aaa', cursor: 'pointer' }}
+                                    onClick={() => setShowSaveDialog(false)}
+                                >✕</button>
+                            </div>
+                        )}
+
+                        {/* Load Map */}
+                        <button
+                            style={{
+                                padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
+                                border: '1px solid rgba(96,165,250,0.4)', color: '#60a5fa', background: 'transparent',
+                            }}
+                            onClick={() => setShowMapList(!showMapList)}
+                        >
+                            📂 Tải Map
+                        </button>
+
+                        {/* Export */}
+                        <button
+                            style={{
+                                padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
+                                border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80', background: 'transparent',
+                            }}
+                            onClick={() => exportMapToFile(selectedRobotId)}
+                            disabled={mapPointCount === 0}
+                            title="Xuất file JSON"
+                        >
+                            📤 Xuất File
+                        </button>
+
+                        {/* Clear */}
+                        <button
+                            style={{
+                                padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
+                                border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', background: 'transparent',
+                            }}
+                            onClick={() => {
+                                if (confirm('Xóa toàn bộ bản đồ đã vẽ?')) clearMap(selectedRobotId);
+                            }}
+                            disabled={mapPointCount === 0}
+                        >
+                            🗑️ Xóa
+                        </button>
+                        
+                        {mapSaveMsg && (
+                            <span style={{ fontSize: '11px', color: '#4ade80', animation: 'fadeIn 0.3s' }}>{mapSaveMsg}</span>
+                        )}
+                    </div>
+
+                    {/* Saved Maps Dropdown */}
+                    {showMapList && (
+                        <div style={{
+                            marginTop: '8px', padding: '8px', borderRadius: '10px',
+                            background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(96,165,250,0.2)',
+                            maxHeight: '150px', overflowY: 'auto',
+                        }}>
+                            <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}>Bản đồ đã lưu:</div>
+                            {getSavedMaps().length === 0 ? (
+                                <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>Chưa có bản đồ nào</div>
+                            ) : (
+                                getSavedMaps().map((m, i) => (
+                                    <div key={i} style={{
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                        padding: '4px 6px', borderRadius: '6px', marginBottom: '2px',
+                                        background: 'rgba(255,255,255,0.05)', cursor: 'pointer',
+                                    }}>
+                                        <span 
+                                            style={{ fontSize: '11px', color: '#e2e8f0', flex: 1 }}
+                                            onClick={() => { loadMap(i); setShowMapList(false); setMapSaveMsg('📂 Đã tải!'); setTimeout(() => setMapSaveMsg(''), 2000); }}
+                                        >
+                                            {m.name} ({m.pointCount} pts)
+                                        </span>
+                                        <span style={{ fontSize: '9px', color: '#64748b', marginRight: '6px' }}>
+                                            {new Date(m.timestamp).toLocaleDateString('vi')}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* View Mode Indicator */}
             {(viewMode === 'firstPerson' || viewMode === 'thirdPerson') && (
