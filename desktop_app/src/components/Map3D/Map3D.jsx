@@ -6,6 +6,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { useMissionStore } from '../../stores/missionStore';
 import { useRobotStore } from '../../stores/robotStore';
 import syncService from '../../lib/syncService';
+import autoExplorer from '../../lib/autoExplorer';
 import WarehouseFloor from './WarehouseFloor';
 import Robot3D from './Robot3D';
 import PathRenderer3D from './PathRenderer3D';
@@ -135,9 +136,13 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
     
     const stopRobot = () => {
         import('../../stores/robotStore').then(mod => {
-            mod.useRobotStore.getState().stopMission(selectedRobotId);
-            mod.useRobotStore.getState().sendVelocity(selectedRobotId, 0, 0);
+            // Stop any ongoing planner mission
+            if (mod.useRobotStore.getState().stopMission) {
+                mod.useRobotStore.getState().stopMission(selectedRobotId);
+            }
         });
+        // Stop the physical robot using fleetStore
+        useFleetStore.getState().stopRobot(selectedRobotId);
     };
 
     // Merge fleet data (name, color) with live data (pose, connected)
@@ -152,7 +157,16 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
         width: WAREHOUSE_WIDTH,
         height: WAREHOUSE_HEIGHT,
         zones,
-        docks
+        docks,
+        activeMapSource,
+        activeMapId,
+        activeMapName,
+        savedSlamMaps,
+        saveSlamMap,
+        loadSlamMapPoints,
+        deleteSlamMap,
+        activateSlamMap,
+        activateMockMap,
     } = useMapStore();
 
     const lang = settings.language || 'en';
@@ -161,7 +175,6 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
     const { missions } = useMissionStore();
 
     const [viewMode, setViewMode] = useState('isometric'); // Start with 3D view
-    const [mapSource, setMapSource] = useState('mock'); // 'mock' or 'slam'
     const [showGrid, setShowGrid] = useState(true);
     const [showPaths, setShowPaths] = useState(true);
     const [showLidar, setShowLidar] = useState(true);
@@ -172,6 +185,9 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
     const [mapName, setMapName] = useState('');
     const [showMapList, setShowMapList] = useState(false);
     const [mapSaveMsg, setMapSaveMsg] = useState('');
+    const [isExploring, setIsExploring] = useState(false);
+    const [showMapManager, setShowMapManager] = useState(false);
+    const [continuingMapId, setContinuingMapId] = useState(null); // ID map đang vẽ tiếp
     
     // Get current robot's accumulated point count for display
     const currentRobot = robots.find(r => r.id === selectedRobotId);
@@ -291,7 +307,7 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                     <fog attach="fog" args={['#0a0a1a', 30, 60]} />
 
                     {/* Conditional rendering based on mapSource */}
-                    {mapSource === 'mock' ? (
+                    {activeMapSource === 'mock' && !settings.isMapping ? (
                         <WarehouseFloor
                             size={Math.max(WAREHOUSE_WIDTH, WAREHOUSE_HEIGHT)}
                             showGrid={showGrid}
@@ -327,7 +343,8 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                     ))}
 
                     {/* SLAM Specific Renderers */}
-                    {mapSource === 'slam' && (
+                    {/* SLAM Specific Renderers - show when mapping or SLAM active */}
+                    {(settings.isMapping || activeMapSource === 'slam') && (
                         <>
                             {/* LiDAR Points */}
                             {showLidar && robots.map(robot => (
@@ -355,20 +372,20 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
             <div className="map3d-controls">
                 <div className="source-controls view-controls" style={{ flexDirection: 'row' }}>
                     <button
-                        className={`control-btn ${mapSource === 'mock' ? 'active' : ''}`}
-                        onClick={() => setMapSource('mock')}
+                        className={`control-btn ${activeMapSource === 'mock' && !activeMapId ? 'active' : ''}`}
+                        onClick={() => activateMockMap()}
                         title="Map Giả Lập"
                         style={{ width: 'auto', padding: '0 8px' }}
                     >
                         Map Giả
                     </button>
                     <button
-                        className={`control-btn ${mapSource === 'slam' ? 'active' : ''}`}
-                        onClick={() => setMapSource('slam')}
-                        title="Map Vẽ (SLAM)"
+                        className={`control-btn ${activeMapSource === 'slam' || activeMapId ? 'active' : ''}`}
+                        onClick={() => setShowMapManager(true)}
+                        title="Map SLAM (đã vẽ)"
                         style={{ width: 'auto', padding: '0 8px' }}
                     >
-                        Map Xe Vẽ
+                        {activeMapId ? `📍 ${activeMapName}` : 'Map Xe Vẽ'}
                     </button>
                 </div>
                 
@@ -425,11 +442,11 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                 </div>
             </div>
 
-            {/* SLAM Mapping Control Panel */}
-            {mapSource === 'slam' && (
+            {/* SLAM Mapping Control Panel — always visible when mapping */}
+            {settings.isMapping && (
                 <div className="slam-mapping-panel" style={{
                     position: 'absolute',
-                    top: '8px',
+                    bottom: '40px',
                     left: '50%',
                     transform: 'translateX(-50%)',
                     zIndex: 10,
@@ -437,7 +454,7 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                     backdropFilter: 'blur(12px)',
                     padding: '10px 16px',
                     borderRadius: '16px',
-                    border: `1px solid ${settings.isMapping ? 'rgba(239, 68, 68, 0.5)' : 'rgba(74, 222, 128, 0.3)'}`,
+                    border: '1px solid rgba(239, 68, 68, 0.5)',
                     boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
                     minWidth: '320px',
                 }}>
@@ -447,91 +464,66 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                             style={{
                                 padding: '5px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
                                 border: 'none', color: '#fff',
-                                background: settings.isMapping 
-                                    ? 'linear-gradient(135deg, #ef4444, #dc2626)' 
-                                    : 'linear-gradient(135deg, #22c55e, #16a34a)',
-                                boxShadow: settings.isMapping ? '0 0 12px rgba(239,68,68,0.4)' : '0 0 12px rgba(34,197,94,0.3)',
-                                animation: settings.isMapping ? 'pulse 2s infinite' : 'none',
+                                background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                                boxShadow: '0 0 12px rgba(239,68,68,0.4)',
+                                animation: 'pulse 2s infinite',
                             }}
                             onClick={() => {
-                                if (settings.isMapping) {
-                                    // Stop mapping
-                                    updateSettings({ isMapping: false });
-                                    if (window.exploreActive) {
-                                        clearInterval(window.exploreInterval);
-                                        window.exploreActive = false;
-                                        stopRobot();
-                                    }
-                                } else {
-                                    updateSettings({ isMapping: true });
+                                // Dừng mapping + dừng khám phá
+                                updateSettings({ isMapping: false });
+                                autoExplorer.stop();
+                                setIsExploring(false);
+                                stopRobot();
+                            }}
+                        >
+                            ⏹ Dừng Vẽ
+                        </button>
+
+                        {/* Nút bật/tắt tự chạy */}
+                        <button
+                            style={{
+                                padding: '5px 12px', borderRadius: '12px', fontSize: '11px', cursor: 'pointer',
+                                border: isExploring ? 'none' : '1px solid rgba(59,130,246,0.5)',
+                                color: '#fff',
+                                background: isExploring ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
+                                animation: isExploring ? 'pulse 3s infinite' : 'none',
+                            }}
+                            onClick={() => {
+                                if (isExploring) {
+                                    autoExplorer.stop();
+                                    setIsExploring(false);
+                                    stopRobot();
+                                } else if (selectedRobotId) {
+                                    const getRobotState = () => useRobotStore.getState().robots[selectedRobotId];
+                                    autoExplorer.start(selectedRobotId, getRobotState);
+                                    setIsExploring(true);
                                 }
                             }}
                         >
-                            {settings.isMapping ? '⏹ Dừng Vẽ' : '▶ Bắt Đầu Vẽ Map'}
+                            {isExploring ? '🧠 Đang Tự Chạy...' : '🚀 Tự Chạy Dò'}
                         </button>
-                        
-                        {settings.isMapping && (
+
+                        {isExploring && (
                             <button
                                 style={{
-                                    padding: '5px 12px', borderRadius: '12px', fontSize: '11px', cursor: 'pointer',
-                                    border: window.exploreActive ? 'none' : '1px solid rgba(59,130,246,0.5)',
-                                    color: '#fff',
-                                    background: window.exploreActive ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
+                                    padding: '5px 10px', borderRadius: '12px', fontSize: '11px', cursor: 'pointer',
+                                    border: '1px solid rgba(250,204,21,0.4)', color: '#fbbf24', background: 'transparent',
                                 }}
-                                onClick={() => {
-                                    if (window.exploreActive) {
-                                        clearInterval(window.exploreInterval);
-                                        window.exploreActive = false;
-                                        stopRobot();
-                                    } else {
-                                        window.exploreActive = true;
-                                        // Direct cmd_vel explore: simple wall-follow behavior
-                                        // Instead of NavController (needs costmap), directly send velocity commands
-                                        // based on LiDAR data to avoid obstacles
-                                        window.exploreInterval = setInterval(async () => {
-                                            const storeModule = await import('../../stores/robotStore');
-                                            const rStore = storeModule.useRobotStore.getState();
-                                            const robotState = rStore.robots[selectedRobotId];
-                                            if (!robotState || !robotState.connected) return;
-                                            
-                                            const lidar = robotState.lidarData || [];
-                                            
-                                            // Analyze LiDAR: find min distance in front (±45°) and sides
-                                            let frontMin = 99, leftMin = 99, rightMin = 99;
-                                            for (const p of lidar) {
-                                                if (!p || p.distance <= 0.05 || p.distance > 4) continue;
-                                                const a = p.angle % 360;
-                                                if (a < 45 || a > 315) frontMin = Math.min(frontMin, p.distance);
-                                                else if (a >= 45 && a < 135) rightMin = Math.min(rightMin, p.distance);
-                                                else if (a >= 225 && a < 315) leftMin = Math.min(leftMin, p.distance);
-                                            }
-                                            
-                                            let linear = 0.15; // Default: go forward slowly
-                                            let angular = 0;
-                                            
-                                            if (frontMin < 0.35) {
-                                                // Too close to wall ahead — stop and rotate
-                                                linear = 0;
-                                                angular = leftMin > rightMin ? 0.8 : -0.8;
-                                            } else if (frontMin < 0.6) {
-                                                // Getting close — slow down and start turning
-                                                linear = 0.08;
-                                                angular = leftMin > rightMin ? 0.5 : -0.5;
-                                            } else {
-                                                // Open space — go forward with slight drift to explore
-                                                linear = 0.18;
-                                                // Slight random drift to cover more area
-                                                angular = (Math.random() - 0.5) * 0.3;
-                                            }
-                                            
-                                            rStore.sendVelocity(selectedRobotId, linear, angular);
-                                        }, 300); // 3.3Hz control loop
-                                    }
-                                    setMapSource(s => s); // force re-render
-                                }}
+                                onClick={() => { autoExplorer.stop(); setIsExploring(false); }}
+                                title="Tắt tự chạy để lái bằng bàn phím (WASD)"
                             >
-                                {window.exploreActive ? '🧠 Đang Tự Chạy' : '🚀 Tự Chạy Dò'}
+                                🎮 Lái Tay
                             </button>
+                        )}
+
+                        {/* Đang vẽ tiếp map nào */}
+                        {continuingMapId && (
+                            <span style={{
+                                fontSize: '10px', color: '#60a5fa', fontStyle: 'italic',
+                                background: 'rgba(59,130,246,0.1)', padding: '3px 6px', borderRadius: '6px',
+                            }}>
+                                📝 Vẽ tiếp: {savedSlamMaps.find(m => m.id === continuingMapId)?.name}
+                            </span>
                         )}
 
                         {/* Point counter */}
@@ -543,20 +535,18 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                         </span>
                     </div>
 
-                    {/* Bottom row: save/load/clear */}
+                    {/* Bottom row: save */}
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', flexWrap: 'wrap' }}>
-                        {/* Save Map */}
                         {!showSaveDialog ? (
                             <button
                                 style={{
                                     padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
                                     border: '1px solid rgba(250,204,21,0.4)', color: '#fbbf24', background: 'transparent',
                                 }}
-                                onClick={() => { setShowSaveDialog(true); setMapName(`Map_${new Date().toLocaleTimeString('vi')}`); }}
+                                onClick={() => { setShowSaveDialog(true); setMapName(continuingMapId ? (savedSlamMaps.find(m => m.id === continuingMapId)?.name || '') : `Map_${new Date().toLocaleTimeString('vi')}`); }}
                                 disabled={mapPointCount === 0}
-                                title={mapPointCount === 0 ? 'Chưa có điểm nào để lưu' : 'Lưu bản đồ'}
                             >
-                                💾 Lưu Map
+                                💾 {continuingMapId ? 'Cập Nhật Map' : 'Lưu Map Mới'}
                             </button>
                         ) : (
                             <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -565,16 +555,22 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                                     value={mapName}
                                     onChange={e => setMapName(e.target.value)}
                                     style={{
-                                        width: '120px', padding: '3px 6px', borderRadius: '8px', fontSize: '11px',
+                                        width: '140px', padding: '3px 6px', borderRadius: '8px', fontSize: '11px',
                                         border: '1px solid rgba(250,204,21,0.4)', background: 'rgba(0,0,0,0.3)', color: '#fff',
                                     }}
                                     placeholder="Tên map..."
                                     autoFocus
                                     onKeyDown={e => {
                                         if (e.key === 'Enter') {
-                                            saveMap(selectedRobotId, mapName);
+                                            // Lấy points từ robotStore
+                                            const rState = useRobotStore.getState().robots[selectedRobotId];
+                                            const pts = rState?.accumulatedMap || [];
+                                            const id = saveSlamMap(mapName, pts, continuingMapId);
+                                            if (id) {
+                                                setContinuingMapId(id); // Lần sau lưu sẽ ghi đè map này
+                                                setMapSaveMsg('✅ Đã lưu!');
+                                            }
                                             setShowSaveDialog(false);
-                                            setMapSaveMsg('✅ Đã lưu!');
                                             setTimeout(() => setMapSaveMsg(''), 2000);
                                         }
                                     }}
@@ -582,9 +578,14 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                                 <button
                                     style={{ padding: '3px 8px', borderRadius: '8px', fontSize: '11px', border: 'none', background: '#fbbf24', color: '#000', cursor: 'pointer' }}
                                     onClick={() => {
-                                        saveMap(selectedRobotId, mapName);
+                                        const rState = useRobotStore.getState().robots[selectedRobotId];
+                                        const pts = rState?.accumulatedMap || [];
+                                        const id = saveSlamMap(mapName, pts, continuingMapId);
+                                        if (id) {
+                                            setContinuingMapId(id);
+                                            setMapSaveMsg('✅ Đã lưu!');
+                                        }
                                         setShowSaveDialog(false);
-                                        setMapSaveMsg('✅ Đã lưu!');
                                         setTimeout(() => setMapSaveMsg(''), 2000);
                                     }}
                                 >✓</button>
@@ -595,80 +596,217 @@ const Map3D = ({ onWaypointClick, isSelectingWaypoint = false }) => {
                             </div>
                         )}
 
-                        {/* Load Map */}
-                        <button
-                            style={{
-                                padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
-                                border: '1px solid rgba(96,165,250,0.4)', color: '#60a5fa', background: 'transparent',
-                            }}
-                            onClick={() => setShowMapList(!showMapList)}
-                        >
-                            📂 Tải Map
-                        </button>
-
-                        {/* Export */}
-                        <button
-                            style={{
-                                padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
-                                border: '1px solid rgba(74,222,128,0.4)', color: '#4ade80', background: 'transparent',
-                            }}
-                            onClick={() => exportMapToFile(selectedRobotId)}
-                            disabled={mapPointCount === 0}
-                            title="Xuất file JSON"
-                        >
-                            📤 Xuất File
-                        </button>
-
-                        {/* Clear */}
                         <button
                             style={{
                                 padding: '4px 10px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer',
                                 border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', background: 'transparent',
                             }}
                             onClick={() => {
-                                if (confirm('Xóa toàn bộ bản đồ đã vẽ?')) clearMap(selectedRobotId);
+                                if (confirm('Xóa toàn bộ bản đồ đang vẽ?')) {
+                                    clearMap(selectedRobotId);
+                                    setContinuingMapId(null);
+                                }
                             }}
                             disabled={mapPointCount === 0}
                         >
                             🗑️ Xóa
                         </button>
-                        
+
                         {mapSaveMsg && (
                             <span style={{ fontSize: '11px', color: '#4ade80', animation: 'fadeIn 0.3s' }}>{mapSaveMsg}</span>
                         )}
                     </div>
+                </div>
+            )}
 
-                    {/* Saved Maps Dropdown */}
-                    {showMapList && (
-                        <div style={{
-                            marginTop: '8px', padding: '8px', borderRadius: '10px',
-                            background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(96,165,250,0.2)',
-                            maxHeight: '150px', overflowY: 'auto',
-                        }}>
-                            <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}>Bản đồ đã lưu:</div>
-                            {getSavedMaps().length === 0 ? (
-                                <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>Chưa có bản đồ nào</div>
-                            ) : (
-                                getSavedMaps().map((m, i) => (
-                                    <div key={i} style={{
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                        padding: '4px 6px', borderRadius: '6px', marginBottom: '2px',
-                                        background: 'rgba(255,255,255,0.05)', cursor: 'pointer',
-                                    }}>
-                                        <span 
-                                            style={{ fontSize: '11px', color: '#e2e8f0', flex: 1 }}
-                                            onClick={() => { loadMap(i); setShowMapList(false); setMapSaveMsg('📂 Đã tải!'); setTimeout(() => setMapSaveMsg(''), 2000); }}
-                                        >
-                                            {m.name} ({m.pointCount} pts)
-                                        </span>
-                                        <span style={{ fontSize: '9px', color: '#64748b', marginRight: '6px' }}>
-                                            {new Date(m.timestamp).toLocaleDateString('vi')}
-                                        </span>
-                                    </div>
-                                ))
-                            )}
+            {/* Nút Bắt Đầu Vẽ Map (hiện khi KHÔNG mapping) */}
+            {!settings.isMapping && (
+                <div style={{
+                    position: 'absolute', bottom: '40px', left: '50%', transform: 'translateX(-50%)', zIndex: 10,
+                }}>
+                    <button
+                        style={{
+                            padding: '6px 16px', borderRadius: '14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                            border: 'none', color: '#fff',
+                            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                            boxShadow: '0 0 12px rgba(34,197,94,0.3)',
+                        }}
+                        onClick={() => {
+                            updateSettings({ isMapping: true });
+                            setContinuingMapId(null); // Map mới
+                        }}
+                        disabled={!selectedRobotId}
+                        title={!selectedRobotId ? 'Chọn robot trước' : ''}
+                    >
+                        ▶ Bắt Đầu Vẽ Map Mới
+                    </button>
+                </div>
+            )}
+
+            {/* Map Manager Modal */}
+            {showMapManager && (
+                <div style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+                    zIndex: 100, display: 'flex', justifyContent: 'center', alignItems: 'center',
+                }} onClick={(e) => { if (e.target === e.currentTarget) setShowMapManager(false); }}>
+                    <div style={{
+                        background: 'rgba(15, 15, 35, 0.98)', borderRadius: '20px',
+                        border: '1px solid rgba(139, 92, 246, 0.3)', padding: '20px',
+                        width: '420px', maxHeight: '80vh', overflowY: 'auto',
+                        boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h3 style={{ margin: 0, color: '#e2e8f0', fontSize: '16px' }}>🗺️ Quản Lý Bản Đồ</h3>
+                            <button
+                                onClick={() => setShowMapManager(false)}
+                                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '18px', cursor: 'pointer' }}
+                            >✕</button>
                         </div>
-                    )}
+
+                        {/* Mock map option */}
+                        <div style={{
+                            padding: '10px 12px', borderRadius: '12px', marginBottom: '8px', cursor: 'pointer',
+                            background: activeMapSource === 'mock' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.03)',
+                            border: activeMapSource === 'mock' ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                        }} onClick={() => { activateMockMap(); setShowMapManager(false); }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '20px' }}>🏭</span>
+                                <div>
+                                    <div style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: 600 }}>Map Giả Lập (Warehouse)</div>
+                                    <div style={{ color: '#94a3b8', fontSize: '11px' }}>15×15m • 6 zones • 3 docks</div>
+                                </div>
+                                {activeMapSource === 'mock' && <span style={{ marginLeft: 'auto', color: '#4ade80', fontSize: '11px' }}>✓ Đang dùng</span>}
+                            </div>
+                        </div>
+
+                        {/* Saved SLAM maps */}
+                        <div style={{ color: '#94a3b8', fontSize: '11px', margin: '16px 0 8px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            📍 Bản đồ robot đã vẽ ({savedSlamMaps.length})
+                        </div>
+
+                        {savedSlamMaps.length === 0 ? (
+                            <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', fontSize: '12px', fontStyle: 'italic' }}>
+                                Chưa có bản đồ nào. Bấm "Bắt Đầu Vẽ Map Mới" để tạo.
+                            </div>
+                        ) : (
+                            savedSlamMaps.map(m => (
+                                <div key={m.id} style={{
+                                    padding: '10px 12px', borderRadius: '12px', marginBottom: '6px',
+                                    background: activeMapId === m.id ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.03)',
+                                    border: activeMapId === m.id ? '1px solid rgba(96,165,250,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontSize: '20px' }}>{activeMapId === m.id ? '📍' : '🗺️'}</span>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: 500 }}>{m.name}</div>
+                                            <div style={{ color: '#94a3b8', fontSize: '10px' }}>
+                                                {m.pointCount.toLocaleString()} pts • {m.bounds?.width}×{m.bounds?.height}m • {new Date(m.timestamp).toLocaleDateString('vi')}
+                                            </div>
+                                        </div>
+                                        {activeMapId === m.id && <span style={{ color: '#60a5fa', fontSize: '10px' }}>✓ Active</span>}
+                                    </div>
+
+                                    {/* Action buttons */}
+                                    <div style={{ display: 'flex', gap: '4px', marginTop: '8px', flexWrap: 'wrap' }}>
+                                        <button
+                                            style={{
+                                                padding: '3px 10px', borderRadius: '8px', fontSize: '10px', cursor: 'pointer',
+                                                border: 'none', color: '#fff',
+                                                background: activeMapId === m.id ? 'rgba(96,165,250,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                                            }}
+                                            onClick={() => { activateSlamMap(m.id); setShowMapManager(false); }}
+                                            disabled={activeMapId === m.id}
+                                        >
+                                            🎯 Dùng Map Này
+                                        </button>
+
+                                        <button
+                                            style={{
+                                                padding: '3px 10px', borderRadius: '8px', fontSize: '10px', cursor: 'pointer',
+                                                border: '1px solid rgba(74,222,128,0.3)', color: '#4ade80', background: 'transparent',
+                                            }}
+                                            onClick={() => {
+                                                // Tải points vào robot → vẽ tiếp
+                                                const pts = loadSlamMapPoints(m.id);
+                                                if (pts.length > 0 && selectedRobotId) {
+                                                    useRobotStore.setState(state => ({
+                                                        robots: {
+                                                            ...state.robots,
+                                                            [selectedRobotId]: {
+                                                                ...state.robots[selectedRobotId],
+                                                                accumulatedMap: pts,
+                                                            }
+                                                        }
+                                                    }));
+                                                    setContinuingMapId(m.id);
+                                                    updateSettings({ isMapping: true });
+                                                    setShowMapManager(false);
+                                                    setMapSaveMsg(`📝 Đang vẽ tiếp: ${m.name}`);
+                                                    setTimeout(() => setMapSaveMsg(''), 3000);
+                                                }
+                                            }}
+                                            disabled={!selectedRobotId}
+                                        >
+                                            ✏️ Vẽ Tiếp
+                                        </button>
+
+                                        <button
+                                            style={{
+                                                padding: '3px 10px', borderRadius: '8px', fontSize: '10px', cursor: 'pointer',
+                                                border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', background: 'transparent',
+                                            }}
+                                            onClick={() => {
+                                                if (confirm(`Xóa vĩnh viễn map "${m.name}"?`)) {
+                                                    deleteSlamMap(m.id);
+                                                }
+                                            }}
+                                        >
+                                            🗑
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+
+                        {/* Import map from file */}
+                        <div style={{ marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px' }}>
+                            <button
+                                style={{
+                                    padding: '6px 14px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer', width: '100%',
+                                    border: '1px dashed rgba(139,92,246,0.4)', color: '#a78bfa', background: 'transparent',
+                                }}
+                                onClick={() => {
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = '.json';
+                                    input.onchange = (e) => {
+                                        const file = e.target.files[0];
+                                        if (!file) return;
+                                        const reader = new FileReader();
+                                        reader.onload = (ev) => {
+                                            try {
+                                                const data = JSON.parse(ev.target.result);
+                                                const pts = data.points || data;
+                                                if (Array.isArray(pts) && pts.length > 0) {
+                                                    const name = data.name || file.name.replace('.json', '');
+                                                    saveSlamMap(name, pts);
+                                                    setMapSaveMsg(`📥 Đã nhập: ${name}`);
+                                                    setTimeout(() => setMapSaveMsg(''), 2000);
+                                                }
+                                            } catch (err) {
+                                                alert('File không hợp lệ!');
+                                            }
+                                        };
+                                        reader.readAsText(file);
+                                    };
+                                    input.click();
+                                }}
+                            >
+                                📥 Nhập Map Từ File JSON
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

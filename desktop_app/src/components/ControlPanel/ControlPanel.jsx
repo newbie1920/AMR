@@ -5,16 +5,22 @@ import translations from '../../translations';
 import './ControlPanel.css';
 
 const ControlPanel = () => {
-    const {
-        connected,
-        sendVelocity,
-        stopRobot,
-        robotVelocity,
-        isNavigating,
-        cancelNavigation
-    } = useRobotStore();
+    const { settings, selectedRobotId, stopRobot: fleetStopRobot } = useFleetStore();
+    const activeRobot = useRobotStore(state => state.robots[selectedRobotId]);
+    const sendVelocity = useRobotStore(state => state.sendVelocity);
+    const stopMission = useRobotStore(state => state.stopMission);
 
-    const { settings } = useFleetStore();
+    const connected = activeRobot?.connected || false;
+    const robotVelocity = activeRobot?.velocity || { linear: 0, angular: 0 };
+    const isNavigating = activeRobot?.isNavigating || false;
+
+    const stopRobot = useCallback(() => {
+        if (selectedRobotId) fleetStopRobot(selectedRobotId);
+    }, [selectedRobotId, fleetStopRobot]);
+
+    const cancelNavigation = useCallback(() => {
+        if (selectedRobotId) stopMission(selectedRobotId);
+    }, [selectedRobotId, stopMission]);
 
     const [linearSpeed, setLinearSpeed] = useState(0.3);
     const [angularSpeed, setAngularSpeed] = useState(0.5);
@@ -27,14 +33,14 @@ const ControlPanel = () => {
     // Keyboard control has been moved to App.jsx to prevent duplicate events overloading the ESP32 WebSocket
 
     const handleJoystickButton = useCallback((linear, angular, isPressed) => {
-        if (!connected) return;
+        if (!connected || !selectedRobotId) return;
 
         if (isPressed) {
-            sendVelocity(linear, angular);
+            sendVelocity(selectedRobotId, linear, angular);
         } else {
             stopRobot();
         }
-    }, [connected, sendVelocity, stopRobot]);
+    }, [connected, selectedRobotId, sendVelocity, stopRobot]);
 
     return (
         <div className="control-panel">

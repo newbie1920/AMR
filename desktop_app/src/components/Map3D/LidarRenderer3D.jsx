@@ -9,8 +9,8 @@ const LidarRenderer3D = ({ robot, showAccumulated = true }) => {
     // Real-time scan geometry (red dots showing current LiDAR sweep)
     const scanGeometry = useMemo(() => {
         if (points.length === 0) return null;
-        // Filter valid points
-        const validPoints = points.filter(p => p.distance > 0.05 && p.distance < 6.0);
+        // Filter valid points. Ignore <= 0.18m to prevent seeing the robot's own chassis/bumper
+        const validPoints = points.filter(p => p.distance > 0.18 && p.distance < 6.0);
         if (validPoints.length === 0) return null;
         
         const positions = new Float32Array(validPoints.length * 3);

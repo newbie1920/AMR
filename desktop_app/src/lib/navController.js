@@ -27,14 +27,14 @@ import HectorSlam from './slam/hectorSlam';
 import WaypointSequencer from './waypointSequencer';
 
 const CONFIG = {
-    cmdVelHz: 10,
-    planHz: 2,
-    goalTolerance: 0.15,
-    yawTolerance: 0.1,
-    stuckMinMove: 0.01, // Threshold for movement (meters)
-    stuckMinTurn: 0.02,  // Threshold for rotation (radians)
-    stuckTimeoutSec: 30, // Increased to 30s to be less sensitive
-    costmapRolling: false // Disabled: Rolling window causes instability in simulation without lidar
+    cmdVelHz: 20, // Tốc độ điều khiển cao cho Gaming và chính xác
+    planHz: 3,
+    goalTolerance: 0.03, // 3cm
+    yawTolerance: 0.08,  // nới lỏng lên ~4.5 độ để tránh bù trừ vô tận
+    stuckMinMove: 0.005,
+    stuckMinTurn: 0.01,
+    stuckTimeoutSec: 40,
+    costmapRolling: false 
 };
 
 const NAV_STATE = {
@@ -85,6 +85,9 @@ class NavController {
             console.warn('[NavController] Failed to initialize Web Workers, falling back to main thread.', e);
         }
 
+        this._goalReachedCycles = 0;
+        this._isPreciseApproaching = false;
+        this._obstacleDetected = false;
         this._listeners = [];
         this._cmdTimer = null;
         this._planTimer = null;
@@ -376,35 +379,52 @@ class NavController {
         console.log(`[NavController] Path replanned: ${path.length} waypoints.`);
     }
 
+    _checkGoal(mapPose) {
+        if (!this._goal || (this._state !== NAV_STATE.FOLLOWING && this._state !== NAV_STATE.NAVIGATING_THROUGH)) return;
+
+        const dx = this._goal.x - mapPose.x;
+        const dy = this._goal.y - mapPose.y;
+        const distToGoal = Math.sqrt(dx * dx + dy * dy);
+
+        if (distToGoal < CONFIG.goalTolerance) {
+            const yawErr = Math.abs(this._angleDiff(this._goal.theta, mapPose.theta));
+            
+            // ✅ CƠ CHẾ CHỐT HƯỚNG CỰC ĐANH (Ultra-Stable Hysteresis)
+            if (yawErr < CONFIG.yawTolerance) {
+                 this._goalReachedCycles++;
+                 this._publishVelocity(0, 0); // KHÓA CỨNG bánh xe
+                 
+                 if (this._goalReachedCycles >= 10) { // Cần 10 nhịp ổn định (~0.5s)
+                    console.log(`[NavController:${this._robotId}] 🏁 🎯 ĐÃ ĐẬU CHÍNH XÁC: ${(distToGoal*100).toFixed(1)}cm, ${(yawErr*180/Math.PI).toFixed(1)}°`);
+                    this.stop(NAV_STATE.GOAL_REACHED);
+                 }
+            } else {
+                this._goalReachedCycles = 0;
+                // 🐌 CHẾ ĐỘ RÙA BÒ SIÊU CẤP (Super-Snail Inching)
+                // Ép tốc độ xoay xuống mức tối thiểu mà motor vẫn nhích được
+                const err = this._angleDiff(this._goal.theta, mapPose.theta);
+                const w = Math.sign(err) * Math.max(0.06, Math.min(0.12, Math.abs(err * 0.4)));
+                
+                // Gửi lệnh rồi cho robot "nghỉ ngơi" một nhịp cực ngắn để không bị vọt lố
+                this._publishVelocity(0, w);
+            }
+        }
+    }
+
     _cmdLoop() {
         // Control loop should run when following a path or during through-navigation
         if (this._state !== NAV_STATE.FOLLOWING && this._state !== NAV_STATE.NAVIGATING_THROUGH) return;
-        if (!this._goal || !this._path.length) return;
+        if (!this._goal || !this._path || this._path.length === 0) return;
 
         const mapPose = this.tf.getMapPose();
+        
+        this._checkGoal(mapPose);
+        if (this._state === NAV_STATE.GOAL_REACHED) return;
+
         const distToGoal = Math.hypot(this._goal.x - mapPose.x, this._goal.y - mapPose.y);
 
-        if (Math.random() < 0.05) {
-             console.log(`[NavController] Dist to goal: ${distToGoal.toFixed(2)}m | Pose: (${mapPose.x.toFixed(2)}, ${mapPose.y.toFixed(2)})`);
-        }
-        
-        // ─── Goal check ────────────────────────────────────────────────────────
-        if (distToGoal < CONFIG.goalTolerance) {
-            const yawErr = Math.abs(this._angleDiff(this._goal.theta, mapPose.theta));
-            if (yawErr < CONFIG.yawTolerance) {
-                robotBridge.cmdVel(this._robotId, 0, 0);
-                this._setState(NAV_STATE.GOAL_REACHED);
-                console.log(`[NavController:${this._robotId}] Goal reached!`);
-                return;
-            }
-            // Rotate in place to final heading
-            // CMD SIGN FIX: Negate output to compensate for firmware's internal negation
-            const w = this._angleDiff(this._goal.theta, mapPose.theta) * 0.4;
-            robotBridge.cmdVel(this._robotId, 0, Math.max(-0.2, Math.min(0.2, w)));
-            return;
-        }
-
         // ─── Stuck detection ───────────────────────────────────────────────────
+
         const moved = Math.hypot(mapPose.x - this._stuckLastPos.x, mapPose.y - this._stuckLastPos.y);
         const turned = Math.abs(this._angleDiff(mapPose.theta, this._stuckLastPos.theta));
 

@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
 const path = require('path');
 const net = require('net');
 const fs = require('fs');
+const { exec } = require('child_process');
+
 
 let mainWindow;
 
@@ -35,6 +37,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+    // Phase 5: Auto-start docker-compose
+    const dockerPath = path.join(__dirname, '../../docker-compose.yml');
+    console.log('Starting ROS2 Docker environment...');
+    exec(`docker compose -f "${dockerPath}" up -d`, (err, stdout, stderr) => {
+        if (err) console.error(`Docker start error: ${err}`);
+        else console.log('Docker environment running.');
+    });
+
     createWindow();
 
     app.on('activate', () => {
@@ -57,6 +67,11 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    
+    // Phase 5: Auto-stop docker-compose
+    const dockerPath = path.join(__dirname, '../../docker-compose.yml');
+    console.log('Stopping ROS2 Docker environment...');
+    exec(`docker compose -f "${dockerPath}" down`, (err, stdout, stderr) => {});
 });
 
 app.on('window-all-closed', () => {

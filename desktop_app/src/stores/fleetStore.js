@@ -602,12 +602,59 @@ const useFleetStore = create(
                 return JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
             },
 
-            deleteSavedMap: (mapIndex) => {
+            saveMapToLibrary: (robotId, mapName) => {
+                const robot = get().robots.find(r => r.id === robotId);
+                if (!robot) return;
+
                 const savedMaps = JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
-                if (mapIndex >= 0 && mapIndex < savedMaps.length) {
-                    savedMaps.splice(mapIndex, 1);
-                    localStorage.setItem('amr_saved_maps', JSON.stringify(savedMaps));
-                }
+                const newMap = {
+                    id: `map_${Date.now()}`,
+                    name: mapName || `Map ${new Date().toLocaleTimeString()}`,
+                    timestamp: Date.now(),
+                    points: robot.accumulatedMap || [],
+                    origin: robot.pose || { x: 7.5, y: 7.5, theta: 0 }
+                };
+
+                savedMaps.push(newMap);
+                localStorage.setItem('amr_saved_maps', JSON.stringify(savedMaps));
+                console.log(`[Store] Map saved to library: ${newMap.name}`);
+                return newMap;
+            },
+
+            loadMapToRobot: (robotId, mapData) => {
+                const robot = get().robots.find(r => r.id === robotId);
+                if (!robot) return;
+
+                set(state => ({
+                    robots: state.robots.map(r =>
+                        r.id === robotId
+                            ? { ...r, accumulatedMap: mapData.points || [], pose: mapData.origin || r.pose }
+                            : r
+                    )
+                }));
+
+                // 2. Sync to robotStore (navigation stack)
+                import('./robotStore').then(mod => {
+                    const rStore = mod.useRobotStore;
+                    rStore.setState(state => ({
+                        robots: {
+                            ...state.robots,
+                            [robotId]: { 
+                                ...state.robots[robotId], 
+                                accumulatedMap: mapData.points || [],
+                                pose: mapData.origin || (state.robots[robotId]?.pose)
+                            }
+                        }
+                    }));
+                    // Reset navController's internal state if needed
+                    const nc = rStore.getState().getNavController(robotId);
+                    if (nc) {
+                        nc.resetLocalMap?.();
+                        nc.setMapData?.(mapData.points || []);
+                    }
+                }).catch(err => console.error('[Store] loadMap sync error:', err));
+
+                console.log(`[Store] Map loaded to robot ${robotId}: ${mapData.name}`);
             },
 
             exportMapToFile: (robotId) => {

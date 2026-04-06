@@ -42,11 +42,23 @@ class PathDistCritic {
 class PathAlignCritic {
     constructor(weight = 0.2) { this.weight = weight; }
     score(traj, context) {
-        const { targetWp } = context;
+        const { targetWp, v } = context;
+        if (!targetWp) return 1.0;
+        
         const end = traj[traj.length - 1];
         const start = traj[0];
+        
+        // Calculate the angle from robot to target
         const desiredAngle = Math.atan2(targetWp.y - start.y, targetWp.x - start.x);
-        const headingError = Math.abs(this._angleDiff(end.theta, desiredAngle));
+        
+        // If reversing (v < 0), use the robot's back direction for alignment (theta + PI)
+        let currentHeading = end.theta;
+        if (v < -0.01) {
+            currentHeading += Math.PI;
+        }
+        
+        const headingError = Math.abs(this._angleDiff(currentHeading, desiredAngle));
+        // Normalize: higher score for smaller error
         return 1.0 - headingError / Math.PI;
     }
     _angleDiff(a, b) {
@@ -64,15 +76,14 @@ class ObstacleCritic {
         let minClearance = 1.0;
         const r = robotRadius + footprintPadding;
 
-        for (const pt of traj) {
+        // Skip index 0 (current pose) to avoid deadlock if current position is noisy or touching
+        for (let i = 1; i < traj.length; i++) {
+            const pt = traj[i];
             const cost = costmap.getCost(pt.x, pt.y);
 
             // COST_LETHAL is 254. COST_UNKNOWN is 255.
-            // We only block if it's explicitly lethal.
-            if (cost >= 254 && cost < 255) return -100; // Collision with known obstacle
+            if (cost >= 254 && cost < 255) return -100; // Collision
 
-            // Treat UNKNOWN (255) as navigable for now, but slightly less desirable
-            // than clear space (0).
             const normalizedCost = (cost === 255) ? 128 : cost;
             const clearance = 1.0 - normalizedCost / 254;
             minClearance = Math.min(minClearance, clearance);
@@ -85,25 +96,27 @@ class VelocityCritic {
     constructor(weight = 0.1) { this.weight = weight; }
     score(traj, context) {
         const { v, maxLinearVel } = context;
-        return v / maxLinearVel;
+        // Reward high absolute velocity, but perhaps slightly prefer forward
+        const absV = Math.abs(v);
+        return (v >= 0) ? (absV / maxLinearVel) : (absV / maxLinearVel * 0.8);
     }
 }
 
 // ─── Planner ────────────────────────────────────────────────────────────────
 
 const DEFAULTS = {
-    maxLinearVel: 0.85, // Significant increase for straight lines
-    minLinearVel: 0.0,
-    maxAngularVel: 0.6, // Tăng lên 0.6 để ôm cua tốt, không lạng
+    maxLinearVel: 0.85, 
+    minLinearVel: -0.2, // 🚀 BẬT CHẾ ĐỘ DE XE (REVERSE ENABLED)
+    maxAngularVel: 0.6, 
     minAngularVel: -0.6,
-    maxLinearAcc: 0.8,  // Allow faster takeoff
-    maxAngularAcc: 1.2, // Tăng tốc tối đa khi xoay, giúp xe quay nhanh và không trễ khúc cua
+    maxLinearAcc: 0.8,  
+    maxAngularAcc: 1.2, 
     simTime: 1.5,
     dt: 0.1,
     vSamples: 15,
     wSamples: 21,
     robotRadius: 0.22,
-    footprintPadding: 0.02,
+    footprintPadding: 0.05, // Slight increase for safety when reversing
     goalTolerance: 0.15,
 };
 

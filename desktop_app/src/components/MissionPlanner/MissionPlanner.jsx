@@ -8,30 +8,41 @@ const MissionPlanner = () => {
         missions,
         addMission,
         assignMission,
+        startMission,
+        pauseMission,
+        resumeMission,
         cancelMission,
+        resetMission,
         removeMission,
         clearCompletedMissions,
     } = useMissionStore();
 
     const { robots } = useFleetStore();
 
-    const [showCreateModal, setShowCreateModal] = useState(false);
-    const [newMission, setNewMission] = useState({
-        name: '',
-        targetTime: 60,
-        waypoints: [],
-    });
-    const [isAddingWaypoint, setIsAddingWaypoint] = useState(false);
-
     const handleCreateMission = () => {
-        if (newMission.waypoints.length < 2) {
-            alert('Nhiệm vụ cần ít nhất 2 điểm!');
+        if (newMission.waypoints.length < 1) {
+            alert('Nhiệm vụ cần ít nhất 1 điểm đến!');
             return;
+        }
+
+        // Tự động thêm vị trí hiện tại của xe làm Điểm 0 (Start Point)
+        let startingWaypoints = [...newMission.waypoints];
+        const activeRobot = robots.find(r => r.connected) || robots[0];
+        
+        if (activeRobot && activeRobot.pose) {
+            const startPose = {
+                x: activeRobot.pose.x,
+                y: activeRobot.pose.y,
+                action: 'start',
+                name: 'Vị trí hiện tại'
+            };
+            startingWaypoints = [startPose, ...newMission.waypoints];
+            console.log('[MissionPlanner] Prepending robot pose as Point 0:', startPose);
         }
 
         const missionId = addMission(
             newMission.name || `Nhiệm vụ ${missions.length + 1}`,
-            newMission.waypoints,
+            startingWaypoints,
             newMission.targetTime > 0 ? newMission.targetTime : null
         );
 
@@ -63,7 +74,9 @@ const MissionPlanner = () => {
     const getStatusColor = (status) => {
         switch (status) {
             case 'pending': return '#6b7280';
+            case 'assigned': return '#8b5cf6';
             case 'active': return '#3b82f6';
+            case 'paused': return '#f59e0b';
             case 'completed': return '#10b981';
             case 'failed': return '#ef4444';
             default: return '#6b7280';
@@ -73,7 +86,9 @@ const MissionPlanner = () => {
     const getStatusIcon = (status) => {
         switch (status) {
             case 'pending': return '⏸';
+            case 'assigned': return '🎯';
             case 'active': return '▶';
+            case 'paused': return '⏸';
             case 'completed': return '✓';
             case 'failed': return '✕';
             default: return '○';
@@ -192,7 +207,7 @@ const MissionPlanner = () => {
                                             }}
                                             defaultValue=""
                                         >
-                                            <option value="">Chọn robot...</option>
+                                            <option value="">Giao cho robot...</option>
                                             {robots
                                                 .filter(r => r.connected)
                                                 .map(robot => (
@@ -204,7 +219,18 @@ const MissionPlanner = () => {
                                     </div>
                                 )}
 
-                                {mission.status === 'active' && (
+                                {mission.status === 'assigned' && (
+                                    <div className="mission-actions">
+                                        <button
+                                            className="btn btn-sm btn-primary w-full"
+                                            onClick={() => startMission(mission.id)}
+                                        >
+                                            ▶️ Bắt đầu nhiệm vụ
+                                        </button>
+                                    </div>
+                                )}
+
+                                {(mission.status === 'active' || mission.status === 'paused') && (
                                     <div className="mission-actions">
                                         <div className="progress-info">
                                             <span>
@@ -219,19 +245,62 @@ const MissionPlanner = () => {
                                                 />
                                             </div>
                                         </div>
-                                        <button
-                                            className="btn btn-sm btn-danger"
-                                            onClick={() => cancelMission(mission.id)}
-                                        >
-                                            Hủy
-                                        </button>
+                                        <div className="card-controls">
+                                            {mission.status === 'active' ? (
+                                                <button
+                                                    className="btn btn-sm btn-warning"
+                                                    onClick={() => pauseMission(mission.id)}
+                                                    title="Tạm dừng"
+                                                >
+                                                    ⏸ Tạm dừng
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    className="btn btn-sm btn-success"
+                                                    onClick={() => resumeMission(mission.id)}
+                                                    title="Tiếp tục"
+                                                >
+                                                    ▶️ Tiếp tục
+                                                </button>
+                                            )}
+                                            
+                                            {/* Nút Reset Mission quyền năng */}
+                                            <button
+                                                className="btn btn-sm btn-purple"
+                                                style={{ backgroundColor: '#8b5cf6', color: 'white' }}
+                                                onClick={() => resetMission(mission.id)}
+                                                title="Reset và chạy lại từ điểm đầu tiên"
+                                            >
+                                                🔄 Bắt đầu lại
+                                            </button>
+
+                                            <button
+                                                className="btn btn-sm btn-danger"
+                                                onClick={() => cancelMission(mission.id)}
+                                                title="Hủy bỏ nhiệm vụ"
+                                            >
+                                                ✕ Hủy bỏ
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
 
-                                {mission.status === 'completed' && (
-                                    <div className="mission-result">
-                                        <span className="result-label">✓ Hoàn thành trong</span>
-                                        <span className="result-time">{formatTime(getElapsedTime(mission))}</span>
+                                {(mission.status === 'completed' || mission.status === 'failed') && (
+                                    <div className="mission-actions">
+                                        <div className="mission-result">
+                                            <span className="result-label">
+                                                {mission.status === 'completed' ? '✓ Hoàn thành' : '✕ Thất bại'}
+                                            </span>
+                                            {mission.status === 'completed' && (
+                                                <span className="result-time">{formatTime(getElapsedTime(mission))}</span>
+                                            )}
+                                        </div>
+                                        <button
+                                            className="btn btn-sm btn-outline-primary"
+                                            onClick={() => resetMission(mission.id)}
+                                        >
+                                            🔄 Chạy lại nhiệm vụ này
+                                        </button>
                                     </div>
                                 )}
                             </div>

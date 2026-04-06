@@ -44,13 +44,19 @@ class PathDistCritic {
 class PathAlignCritic {
     constructor(weight = 0.2) { this.weight = weight; }
     score(traj, context) {
-        const { targetWp } = context;
+        const { targetWp, v } = context;
         if (!targetWp) return 0;
         const end = traj[traj.length - 1];
         const start = traj[0];
         const desiredAngle = Math.atan2(targetWp.y - start.y, targetWp.x - start.x);
         
-        let d = end.theta - desiredAngle;
+        let currentHeading = end.theta;
+        // If moving backwards, use the back of the robot for alignment
+        if (v < -0.01) {
+            currentHeading += Math.PI;
+        }
+
+        let d = currentHeading - desiredAngle;
         while (d > Math.PI) d -= 2 * Math.PI;
         while (d < -Math.PI) d += 2 * Math.PI;
         
@@ -68,7 +74,9 @@ class ObstacleCritic {
         let minClearance = 1.0;
         const grid = new Uint8Array(costmapData);
         
-        for (const pt of traj) {
+        // Skip index 0 (current pose) to avoid deadlock if current position is noisy
+        for (let i = 1; i < traj.length; i++) {
+            const pt = traj[i];
             // Get cost
             const cx = Math.floor((pt.x - meta.origin.x) / meta.resolution);
             const cy = Math.floor((pt.y - meta.origin.y) / meta.resolution);
@@ -92,23 +100,25 @@ class VelocityCritic {
     constructor(weight = 0.1) { this.weight = weight; }
     score(traj, context) {
         const { v, maxLinearVel } = context;
-        return v / maxLinearVel;
+        const absV = Math.abs(v);
+        // Reward high velocity, slightly penalize reversing to favor forward motion
+        return (v >= 0) ? (absV / maxLinearVel) : (absV / maxLinearVel * 0.8);
     }
 }
 
 const DEFAULTS = {
-    maxLinearVel: 0.4,
-    minLinearVel: 0.0,
-    maxAngularVel: 1.2,
-    minAngularVel: -1.2,
-    maxLinearAcc: 0.5,
-    maxAngularAcc: 2.0,
+    maxLinearVel: 0.85,
+    minLinearVel: -0.2, // 🚀 Bật lùi xe trong Worker
+    maxAngularVel: 0.6,
+    minAngularVel: -0.6,
+    maxLinearAcc: 0.8,
+    maxAngularAcc: 1.2,
     simTime: 1.5,
     dt: 0.1,
     vSamples: 15,
     wSamples: 21,
     robotRadius: 0.22,
-    footprintPadding: 0.02,
+    footprintPadding: 0.05,
     goalTolerance: 0.15,
 };
 

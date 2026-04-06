@@ -172,15 +172,24 @@ class GlobalPlanner {
                 if (closed[nIdx]) continue;
 
                 const cellCost = costmap.getCostAtCell(nx, ny);
-                if (cellCost >= this._maxCostAllowed && cellCost !== COST_UNKNOWN) continue; // Obstacle
+                
+                // ✅ STUCK-ESCAPE LOGIC: 
+                // Nếu đây là các bước đầu tiên (trong bán kính 0.5m), 
+                // cho phép đi qua cả vùng cản để tìm đường thoát ra vùng thoáng.
+                const distFromStart = Math.hypot(nx - startGrid.cx, ny - startGrid.cy) * meta.resolution;
+                const isStartArea = distFromStart < 0.5;
+
+                if (cellCost >= this._maxCostAllowed && cellCost !== COST_UNKNOWN && !isStartArea) continue; // Obstacle
                 if (cellCost === COST_UNKNOWN && !this._allowUnknown) continue;
 
                 // Cost = movement cost + weighted cell traversal cost
                 let costPenalty = 0;
                 if (cellCost === COST_UNKNOWN) {
-                    costPenalty = 1.5; // Moderate penalty for unknown space (was 10.0)
+                    costPenalty = 1.5; 
                 } else {
-                    costPenalty = (cellCost / COST_LETHAL) * this._costWeight;
+                    // Penalty is HIGHER for Lethal cells to ensure we only use them as a last resort to escape
+                    const weight = (cellCost >= COST_LETHAL) ? 20.0 : this._costWeight;
+                    costPenalty = (cellCost / COST_LETHAL) * weight;
                 }
 
                 const tentativeG = current.g + c * meta.resolution + costPenalty * meta.resolution;

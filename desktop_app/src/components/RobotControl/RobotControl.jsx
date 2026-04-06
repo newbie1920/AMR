@@ -46,6 +46,9 @@ const RobotControl = () => {
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [profileName, setProfileName] = useState('');
 
+    const joystickInterval = React.useRef(null);
+    const isJoystickActive = React.useRef(false);
+
     // DWA Planner params
     const [dwaMaxLinVel, setDwaMaxLinVel] = useState(selectedRobot?.config?.dwa_maxLinearVel || 0.2);
     const [dwaMaxAngVel, setDwaMaxAngVel] = useState(selectedRobot?.config?.dwa_maxAngularVel || 1.0);
@@ -54,6 +57,9 @@ const RobotControl = () => {
     const [dwaGoalTol, setDwaGoalTol] = useState(selectedRobot?.config?.dwa_goalTolerance || 0.15);
     const [dwaSimTime, setDwaSimTime] = useState(selectedRobot?.config?.dwa_simTime || 1.5);
     const [dwaSaveSuccess, setDwaSaveSuccess] = useState(false);
+    const manualSpeeds = React.useRef({ linear: 0, angular: 0 });
+    const keysPressed = React.useRef(new Set());
+    const lastPressTime = React.useRef(0);
 
     const {
         updateRobotConfig,
@@ -115,12 +121,114 @@ const RobotControl = () => {
     const handleControl = useCallback((linear, angular, isPressed) => {
         if (!selectedRobot?.connected) return;
 
-        if (isPressed) {
-            sendVelocity(selectedRobotId, linear, angular);
-        } else {
-            stopRobot(selectedRobotId);
+        // Xóa vòng lặp cũ
+        if (joystickInterval.current) {
+            clearInterval(joystickInterval.current);
+            joystickInterval.current = null;
         }
-    }, [selectedRobot, selectedRobotId, sendVelocity, stopRobot]);
+
+        if (isPressed) {
+            isJoystickActive.current = true;
+            manualSpeeds.current = { linear, angular };
+            lastPressTime.current = Date.now();
+
+            // ⚡ Ngắt nhiệm vụ tự động và chặn LiDAR
+            import('../../stores/robotStore').then(mod => {
+                const rStore = mod.useRobotStore.getState();
+                rStore.stopMission(selectedRobotId);
+                rStore.setManualControl(selectedRobotId, true);
+            }).catch(() => {});
+
+            // Gửi lệnh "Turbo-Spam Burst" ngay miligiây đầu tiên (3 phát liên thanh)
+            sendVelocity(selectedRobotId, linear, angular);
+            setTimeout(() => sendVelocity(selectedRobotId, linear, angular), 5);
+            setTimeout(() => sendVelocity(selectedRobotId, linear, angular), 10);
+            
+            // Duy trì vòng lặp 20Hz (50ms)
+            joystickInterval.current = setInterval(() => {
+                const { linear: l, angular: a } = manualSpeeds.current;
+                sendVelocity(selectedRobotId, l, a);
+            }, 50);
+        } else {
+            isJoystickActive.current = false;
+            
+            // 🛡️ TURBO STEP: Nháy phím nhanh = nhích quyết liệt (200ms)
+            const elapsed = Date.now() - lastPressTime.current;
+            const nudgeDuration = 200; 
+            const stopDelay = Math.max(0, nudgeDuration - elapsed);
+
+            setTimeout(() => {
+                if (!isJoystickActive.current) {
+                    stopRobot(selectedRobotId);
+                    setTimeout(() => stopRobot(selectedRobotId), 5); // Burst stop
+                    
+                    // Khôi phục LiDAR
+                    import('../../stores/robotStore').then(mod => {
+                        mod.useRobotStore.getState().setManualControl(selectedRobotId, false);
+                    }).catch(() => {});
+                }
+            }, stopDelay);
+        }
+    }, [selectedRobot?.connected, selectedRobotId, sendVelocity, stopRobot]);
+
+    // ⌨️ Keyboard Gaming Controls
+    React.useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (['input', 'textarea'].includes(document.activeElement.tagName.toLowerCase())) return;
+            const key = e.key.toLowerCase();
+            if (!['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) return;
+            e.preventDefault();
+            if (keysPressed.current.has(key)) return;
+            keysPressed.current.add(key);
+
+            let lin = 0; let ang = 0;
+            if (keysPressed.current.has('w') || keysPressed.current.has('arrowup')) lin += linearSpeed;
+            if (keysPressed.current.has('s') || keysPressed.current.has('arrowdown')) lin -= linearSpeed;
+            if (keysPressed.current.has('a') || keysPressed.current.has('arrowleft')) ang += angularSpeed;
+            if (keysPressed.current.has('d') || keysPressed.current.has('arrowright')) ang -= angularSpeed;
+
+            handleControl(lin, ang, true);
+        };
+
+        const handleKeyUp = (e) => {
+            const key = e.key.toLowerCase();
+            if (!keysPressed.current.has(key)) return;
+            if (keysPressed.current) keysPressed.current.delete(key);
+
+            if (keysPressed.current.size === 0) {
+                handleControl(0, 0, false);
+            } else {
+                let lin = 0; let ang = 0;
+                if (keysPressed.current.has('w') || keysPressed.current.has('arrowup')) lin += linearSpeed;
+                if (keysPressed.current.has('s') || keysPressed.current.has('arrowdown')) lin -= linearSpeed;
+                if (keysPressed.current.has('a') || keysPressed.current.has('arrowleft')) ang += angularSpeed;
+                if (keysPressed.current.has('d') || keysPressed.current.has('arrowright')) ang -= angularSpeed;
+                manualSpeeds.current = { linear: lin, angular: ang };
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        // 🛡️ BẢO VỆ AN TOÀN: Đảm bảo xe LUÔN dừng
+        const globalRelease = () => {
+            if (isJoystickActive.current) {
+                handleControl(0, 0, false);
+                if (keysPressed.current) keysPressed.current.clear();
+            }
+        };
+
+        window.addEventListener('mouseup', globalRelease);
+        window.addEventListener('touchend', globalRelease);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('mouseup', globalRelease);
+            window.removeEventListener('touchend', globalRelease);
+            if (joystickInterval.current) clearInterval(joystickInterval.current);
+        };
+    }, [handleControl, linearSpeed, angularSpeed]);
 
     const updateRobotSpeed = (type, value) => {
         if (!selectedRobotId) return;
@@ -307,63 +415,123 @@ const RobotControl = () => {
                 </button>
             </div>
 
-            {/* Mapping Controls */}
+            {/* Mapping & Auto-Drive Controls */}
             <div className="robot-settings" style={{ borderTop: 'none', marginTop: '0', paddingTop: '0' }}>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {/* Mapping Control */}
                     <button
                         className={`btn btn-sm ${settings.isMapping ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ border: settings.isMapping ? 'none' : '1px solid #44ffaa', color: settings.isMapping ? '#fff' : '#44ffaa' }}
+                        style={{ 
+                            border: settings.isMapping ? 'none' : '1px solid #44ffaa', 
+                            color: settings.isMapping ? '#fff' : '#44ffaa',
+                            flex: '1'
+                        }}
                         onClick={() => updateSettings({ isMapping: !settings.isMapping })}
+                        title={t('mapping_tooltip') || "Hiển thị dữ liệu LiDAR để vẽ bản đồ"}
                     >
                         {settings.isMapping ? `🗺️ ${t('mapping_on')}` : `🗺️ ${t('start_mapping')}`}
                     </button>
-                    {/* Auto Explore toggled with isMapping usually, but here is a dedicated button */}
+                    
+                    {/* Auto-Explorer Control */}
                     <button
-                        className={`btn btn-sm ${window.exploreActive ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ border: window.exploreActive ? 'none' : '1px solid #3b82f6', color: window.exploreActive ? '#fff' : '#3b82f6' }}
+                        className={`btn btn-sm ${window.exploreActive ? 'btn-danger' : 'btn-ghost'}`}
+                        style={{ 
+                            border: window.exploreActive ? 'none' : '1px solid #3b82f6', 
+                            color: window.exploreActive ? '#fff' : '#3b82f6',
+                            flex: '1'
+                        }}
                         onClick={() => {
                             if (window.exploreActive) {
+                                console.log('[AutoExplorer] Stopping...');
                                 clearInterval(window.exploreInterval);
+                                delete window.exploreInterval;
                                 window.exploreActive = false;
                                 stopRobot(selectedRobotId);
                             } else {
+                                console.log('[AutoExplorer] Starting...');
                                 window.exploreActive = true;
                                 if (!settings.isMapping) updateSettings({ isMapping: true });
                                 
-                                // Auto-drive logic
+                                // Integrated Auto-drive logic (Simple Explorer)
                                 window.exploreInterval = setInterval(async () => {
-                                    const storeModule = await import('../../stores/robotStore');
-                                    const rStore = storeModule.useRobotStore.getState();
-                                    const bm = rStore.getBehaviorManager(selectedRobotId);
-                                    const robotState = rStore.robots[selectedRobotId];
-                                    
-                                    if (bm && robotState && !robotState.isNavigating) {
-                                        const rPose = robotState.pose || {x:7.5, y:7.5, theta:0};
-                                        const randomGoal = {
-                                            x: rPose.x + (Math.random() - 0.5) * 4,
-                                            y: rPose.y + (Math.random() - 0.5) * 4,
-                                            theta: 0
-                                        };
-                                        bm.navigateTo(randomGoal);
-                                    }
-                                }, 3000);
+                                    try {
+                                        const storeModule = await import('../../stores/robotStore');
+                                        const rStore = storeModule.useRobotStore.getState();
+                                        const bm = rStore.getBehaviorManager(selectedRobotId);
+                                        const robotState = rStore.robots[selectedRobotId];
+                                        
+                                        // Only move if not already navigating/busy
+                                        if (bm && robotState && !robotState.isNavigating && window.exploreActive) {
+                                            const rPose = robotState.pose || {x:7.5, y:7.5, theta:0};
+                                            const randomGoal = {
+                                                x: rPose.x + (Math.random() - 0.5) * 6,
+                                                y: rPose.y + (Math.random() - 0.5) * 6,
+                                                theta: 0
+                                            };
+                                            console.log('[AutoExplorer] Exploring to:', randomGoal);
+                                            bm.navigateTo(randomGoal);
+                                        }
+                                    } catch (err) { console.error('[AutoExplorer] Error:', err); }
+                                }, 4000); // 4s interval for new goals
                             }
-                            // Force re-render Hack
-                            setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 100);
+                            // Trigger re-render (since we use window object)
+                            setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 200);
+                        }}
+                        title={t('explore_tooltip') || "Robot tự động di chuyển để quét bản đồ khắp nhà"}
+                    >
+                        {window.exploreActive ? `🛑 ${t('stop_auto_explore')}` : `🚀 ${t('auto_explore')}`}
+                    </button>
+
+                    <button
+                        className="btn btn-sm btn-ghost"
+                        style={{ border: '1px solid #facc15', color: '#facc15' }}
+                        onClick={() => {
+                            const name = prompt(t('enter_map_name') || 'Enter map name:');
+                            if (name !== null) {
+                                const { saveMapToLibrary } = useFleetStore.getState();
+                                saveMapToLibrary(selectedRobotId, name);
+                                alert(t('map_saved') || 'Map saved!');
+                            }
                         }}
                     >
-                        {window.exploreActive ? `🚀 Đang Tự Chạy` : `🚀 Tự Chạy Dò Map`}
+                        💾 {t('save_map')}
                     </button>
+
+                    {/* Map Library Loader */}
+                    <div className="map-selector-container" style={{ position: 'relative' }}>
+                        <select 
+                            className="btn btn-sm btn-ghost" 
+                            style={{ border: '1px solid #a855f7', color: '#a855f7', appearance: 'none', paddingRight: '20px' }}
+                            onChange={(e) => {
+                                if (e.target.value === "") return;
+                                const savedMaps = JSON.parse(localStorage.getItem('amr_saved_maps') || '[]');
+                                const mapToLoad = savedMaps.find(m => m.id === e.target.value);
+                                if (mapToLoad && confirm(`${t('load_map') || 'Load'} "${mapToLoad.name}"?`)) {
+                                    const { loadMapToRobot } = useFleetStore.getState();
+                                    loadMapToRobot(selectedRobotId, mapToLoad);
+                                }
+                                e.target.value = "";
+                            }}
+                        >
+                            <option value="">📂 {t('load_map_from_library') || 'Load Map'}</option>
+                            {(JSON.parse(localStorage.getItem('amr_saved_maps') || '[]')).map(m => (
+                                <option key={m.id} value={m.id}>{m.name} ({m.points?.length || 0} pts)</option>
+                            ))}
+                        </select>
+                        <span style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#a855f7', fontSize: '8px' }}>▼</span>
+                    </div>
+
                     {settings.isMapping && (
                         <button
                             className="btn btn-sm btn-ghost"
                             style={{ color: '#ef4444' }}
-                            onClick={() => clearMap(selectedRobotId)}
+                            onClick={() => { if(confirm(t('confirm_clear'))) clearMap(selectedRobotId); }}
                         >
                             🗑️ {t('clear_map')}
                         </button>
                     )}
-                    <div style={{ fontSize: '10px', opacity: 0.7 }}>
+                    
+                    <div style={{ fontSize: '10px', opacity: 0.7, marginLeft: 'auto' }}>
                         Points: {selectedRobot.accumulatedMap?.length || 0}
                     </div>
                 </div>

@@ -603,6 +603,34 @@ export const useMissionStore = create(
                 }));
             },
 
+            // Pause an individual mission
+            pauseMission: (missionId) => {
+                const mission = get().missions.find(m => m.id === missionId);
+                if (mission?.assignedRobotId) {
+                    useRobotStore.getState().pauseMission(mission.assignedRobotId);
+                }
+
+                set(state => ({
+                    missions: state.missions.map(m =>
+                        m.id === missionId ? { ...m, status: 'paused', updatedAt: Date.now() } : m
+                    )
+                }));
+            },
+
+            // Resume an individual mission
+            resumeMission: (missionId) => {
+                const mission = get().missions.find(m => m.id === missionId);
+                if (mission?.assignedRobotId) {
+                    useRobotStore.getState().resumeMission(mission.assignedRobotId);
+                }
+
+                set(state => ({
+                    missions: state.missions.map(m =>
+                        m.id === missionId ? { ...m, status: 'active', updatedAt: Date.now() } : m
+                    )
+                }));
+            },
+
             // Update mission progress
             updateMissionProgress: (missionId, robotPose) => {
                 const mission = get().missions.find(m => m.id === missionId);
@@ -659,6 +687,10 @@ export const useMissionStore = create(
 
             // Cancel mission
             cancelMission: (missionId) => {
+                const mission = get().missions.find(m => m.id === missionId);
+                if (mission?.assignedRobotId) {
+                    useRobotStore.getState().stopMission(mission.assignedRobotId);
+                }
                 set(state => ({
                     missions: state.missions.map(m =>
                         m.id === missionId
@@ -668,8 +700,17 @@ export const useMissionStore = create(
                 }));
             },
 
-            // Reset a failed/canceled mission
+            // Reset/Restart a mission
             resetMission: (missionId) => {
+                const mission = get().missions.find(m => m.id === missionId);
+                
+                // If assigned to a robot, reset that robot's odometry too for a clean restart
+                if (mission?.assignedRobotId) {
+                    const fleetStore = require('./fleetStore').useFleetStore;
+                    fleetStore.getState().resetRobotOdometry(mission.assignedRobotId);
+                    useRobotStore.getState().stopMission(mission.assignedRobotId);
+                }
+
                 set(state => ({
                     missions: state.missions.map(m => {
                         if (m.id !== missionId) return m;

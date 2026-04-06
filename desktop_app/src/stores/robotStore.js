@@ -21,11 +21,11 @@ const initialRobotState = {
     telemetry: { distance: 0, heading: 0, acceleration: 0 },
     traveledPath: [],
     lidarData: [],
+    accumulatedMap: [],
+    mapVersion: 0,
     activeBehavior: 'IDLE',
     isNavigating: false,
     navigationStatus: 'idle',
-    targetPose: null,
-    currentPath: [],
     targetPose: null,
     currentPath: [],
     tfTree: null,
@@ -42,6 +42,60 @@ const useRobotStore = create((set, get) => {
     const navControllers = new Map();
     const behaviorManagers = new Map();
     const subscriptions = new Map();
+
+    // PERFORMANCE OPTIMIZATION: Telemetry & LiDAR update buffering
+    const telemBuffer = new Map(); // robotId -> data
+    const lidarMapBuffer = new Map(); // robotId -> points[]
+    let updateScheduled = false;
+
+    // Grid-based dedup set for mapping (5cm resolution)
+    const GRID_RES = 0.05;
+    const globalMapGridSets = new Map(); // robotId -> Set
+
+    const flushUpdates = () => {
+        set(state => {
+            const newRobots = { ...state.robots };
+            let hasChanges = false;
+
+            // Apply buffered telemetry
+            telemBuffer.forEach((data, rid) => {
+                if (newRobots[rid]) {
+                    newRobots[rid] = { ...newRobots[rid], ...data };
+                    hasChanges = true;
+                }
+            });
+
+            // Apply buffered LiDAR maps
+            lidarMapBuffer.forEach((newPoints, rid) => {
+                const robot = newRobots[rid];
+                if (robot && newPoints.length > 0) {
+                    const currentMap = robot.accumulatedMap || [];
+                    const combinedMap = [...currentMap, ...newPoints].slice(-50000);
+                    newRobots[rid] = { 
+                        ...newRobots[rid], 
+                        accumulatedMap: combinedMap,
+                        mapVersion: (robot.mapVersion || 0) + 1 
+                    };
+                    hasChanges = true;
+                }
+            });
+
+            telemBuffer.clear();
+            lidarMapBuffer.clear();
+            updateScheduled = false;
+
+            if (!hasChanges) return state;
+            return { robots: newRobots };
+        });
+    };
+
+    const queueUpdate = () => {
+        if (!updateScheduled) {
+            updateScheduled = true;
+            // 100ms throttle (10Hz) for UI state updates
+            setTimeout(flushUpdates, 100);
+        }
+    };
 
     // Initialize IPC listeners for monitor status
     if (window.electronAPI && window.electronAPI.onMonitorStatus) {
@@ -63,6 +117,24 @@ const useRobotStore = create((set, get) => {
     return {
         robots: {},
         selectedRobotId: null,
+
+        setManualControl: (robotId, active) => {
+            set(state => ({
+                robots: {
+                    ...state.robots,
+                    [robotId]: { ...state.robots[robotId], manualControlActive: active }
+                }
+            }));
+        },
+
+        setManualControl: (robotId, active) => {
+            set(state => ({
+                robots: {
+                    ...state.robots,
+                    [robotId]: { ...state.robots[robotId], manualControlActive: active }
+                }
+            }));
+        },
 
         connect: (robotId, connectionUrl = null) => {
             const currentRobots = get().robots;
@@ -91,153 +163,133 @@ const useRobotStore = create((set, get) => {
 
             const robotSubs = [];
 
-            // 3. Setup Subscriptions
             // --- Telemetry & Pose ---
             robotSubs.push(robotBridge.subscribe(robotId, MSG.TELEM, (msg) => {
-                const state = get();
-                const robot = state.robots[robotId];
-                if (!robot) return;
+                const robot = get().robots[robotId] || initialRobotState;
 
-                // Handle firmware variations in naming and units
-                // NOTE: Firmware sends negated values (see main.cpp "NEGATE for App").
-                // Theta and velocity keep firmware convention (Robot3D uses -pose.theta to handle it).
-                // Only position X,Y are corrected here so the 3D map shows correct direction.
-                // HEADING FIX: Negate firmware theta.
-                const theta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
-                // VELOCITY FIX: Standard velocity convention
+                let rawTheta = msg.h !== undefined ? (msg.h * Math.PI / 180) : (msg.theta || 0);
+                let rawX = msg.x !== undefined ? msg.x : 0;
+                let rawY = msg.y !== undefined ? msg.y : 0;
+
                 const v = msg.v !== undefined ? msg.v : (msg.vx || 0);
                 const w = msg.w !== undefined ? msg.w : (msg.wz || 0);
                 
-                // POSITION FIX: Standard X,Y coordinates
-                const posX = msg.x !== undefined ? msg.x : (robot.pose?.x ?? 0);
-                const posY = msg.y !== undefined ? msg.y : (robot.pose?.y ?? 0);
+                // 🚀 BẢO TOÀN POSE KHI MẤT KẾT NỐI (Ghost Frame Realignment)
+                if (robot._needsRealign && robot.pose) {
+                    // Khi xe mới thức dậy, odometry của nó luôn bắt đầu từ số 0, nhưng ta biết vị trí thật của nó trên map
+                    const offset = {
+                         x: robot.pose.x - rawX,
+                         y: robot.pose.y - rawY,
+                         // tính toán chênh lệch góc xoay
+                         theta: robot.pose.theta - rawTheta
+                    };
+                    navControllers.get(robotId)._odomOffset = offset; // Lưu vào nháp
+                    set(state => ({
+                        robots: { ...state.robots, [robotId]: { ...state.robots[robotId], _needsRealign: false, _odomOffset: offset } }
+                    }));
+                }
+
+                // Lấy offset đã lưu
+                const offset = robot._odomOffset || { x: 0, y: 0, theta: 0 };
+                
+                // CỘNG BÙ ODOMETRY ẢO
+                const posX = rawX + offset.x;
+                const posY = rawY + offset.y;
+                let theta = rawTheta + offset.theta;
+                // Chuẩn hóa góc theta
+                theta = Math.atan2(Math.sin(theta), Math.cos(theta));
 
                 const traveledPath = robot.traveledPath || [];
-                // Only add point if moved significantly (> 2cm)
+                const lastPoint = traveledPath[traveledPath.length - 1];
                 const shouldAddPoint = traveledPath.length === 0 ||
-                    Math.hypot(posX - (traveledPath.at(-1)?.x ?? 0),
-                        posY - (traveledPath.at(-1)?.y ?? 0)) > 0.02;
+                    Math.hypot(posX - (lastPoint?.x ?? 0), posY - (lastPoint?.y ?? 0)) > 0.05;
 
                 const newPath = shouldAddPoint
-                    ? [...traveledPath, { x: posX, y: posY }]
+                    ? [...traveledPath, { x: posX, y: posY }].slice(-500)
                     : traveledPath;
 
-                const updatedData = {
+                const telemData = {
                     pose: { x: posX, y: posY, theta: theta },
                     velocity: { linear: v, angular: w },
                     battery: msg.batt || 0,
+                    status: msg.status || robot.status || 'active',
                     telemetry: {
                         battery: msg.batt || 0,
                         distance: msg.d || 0,
                         heading: msg.h || 0,
                         acceleration: msg.a || 0,
-                        // DISPLAY FIX: Negate PID velocities so they show positive for forward
-                        vL_t: msg.vL_t,
-                        vL_r: msg.vL_r,
-                        vR_t: msg.vR_t,
-                        vR_r: msg.vR_r,
+                        vL_t: msg.vL_t, vL_r: msg.vL_r,
+                        vR_t: msg.vR_t, vR_r: msg.vR_r,
                         pwmL: msg.pwmL, pwmR: msg.pwmR,
-                        // TICKS: Use raw values
-                        ticks: msg.enc ? {
-                            left: msg.enc.l,
-                            right: msg.enc.r
-                        } : { left: 0, right: 0 },
-                        imu: typeof msg.imu === 'object'
-                            ? msg.imu
-                            : {
-                                enabled: !!msg.imu,
-                                calibrated: !!msg.imu_cal,
-                                gyroZ: msg.gyroZ ?? 0,
-                                fusedHeadingDeg: msg.fTheta ?? msg.h ?? 0,
-                            }
+                        ticks: msg.enc ? { left: msg.enc.l, right: msg.enc.r } : { left: 0, right: 0 },
+                        imu: typeof msg.imu === 'object' ? msg.imu : {
+                            enabled: !!msg.imu,
+                            calibrated: !!msg.imu_cal,
+                            gyroZ: msg.gyroZ ?? 0,
+                            fusedHeadingDeg: msg.fTheta ?? msg.h ?? 0,
+                        }
                     },
-                    traveledPath: newPath.slice(-500)
+                    traveledPath: newPath
                 };
 
-                // Sync with FleetStore
-                useFleetStore.getState().updateRobot(robotId, updatedData);
-
-                // Update local robot state
-                set(state => ({
-                    robots: {
-                        ...state.robots,
-                        [robotId]: {
-                            ...state.robots[robotId],
-                            ...updatedData
-                        }
-                    }
-                }));
-
-                // Feed health monitor
-                healthMonitor.feed(robotId, 'telem');
-            }));
-
-            // --- Status & Logs ---
-            robotSubs.push(robotBridge.subscribe(robotId, MSG.STATUS, (msg) => {
-                set(state => ({
-                    robots: {
-                        ...state.robots,
-                        [robotId]: { ...state.robots[robotId], status: msg.status || 'active' }
-                    }
-                }));
-                useFleetStore.getState().updateRobot(robotId, { status: msg.status || 'active' });
+                // Buffer updates to reduce React re-renders
+                const currentBuffered = telemBuffer.get(robotId) || {};
+                telemBuffer.set(robotId, { ...currentBuffered, ...telemData });
+                
+                // Update fleet store if status changed (rare event)
+                if (msg.status && msg.status !== robot.status) {
+                    useFleetStore.getState().updateRobot(robotId, { status: msg.status });
+                }
+                
+                queueUpdate();
             }));
 
             // --- LiDAR Data ---
-            // Grid-based dedup set for mapping (5cm resolution)
-            const GRID_RES = 0.05; // 5cm grid
-            const _mapGridSet = new Set();
-            
             robotSubs.push(robotBridge.subscribe(robotId, MSG.LIDAR, (msg) => {
                 const fleetState = useFleetStore.getState();
                 const isMapping = fleetState.settings.isMapping;
+                const robot = get().robots[robotId];
+                if (!robot) return;
 
-                set(state => {
-                    const robot = state.robots[robotId];
-                    if (!robot) return state;
+                const pose = robot.pose || { x: 0, y: 0, theta: 0 };
+                const worldPoints = [];
+                
+                if (isMapping && msg.points && msg.points.length > 0) {
+                    if (!globalMapGridSets.has(robotId)) globalMapGridSets.set(robotId, new Set());
+                    const gridSet = globalMapGridSets.get(robotId);
 
-                    let newAccumulatedMap = robot.accumulatedMap || [];
-                    if (isMapping && msg.points && msg.points.length > 0) {
-                        const pose = robot.pose || { x: 0, y: 0, theta: 0 };
-                        const worldPoints = [];
-                        for (const p of msg.points) {
-                            if (p.distance > 0.05 && p.distance < 6.0 && p.quality !== 0) {
-                                const angleRad = (p.angle * Math.PI) / 180 + pose.theta;
-                                const wx = pose.x + p.distance * Math.cos(angleRad);
-                                const wy = pose.y + p.distance * Math.sin(angleRad);
-                                
-                                // Grid-based deduplication: skip if this cell already has a point
-                                const gx = Math.round(wx / GRID_RES);
-                                const gy = Math.round(wy / GRID_RES);
-                                const gridKey = gx + ',' + gy;
-                                if (!_mapGridSet.has(gridKey)) {
-                                    _mapGridSet.add(gridKey);
-                                    worldPoints.push({ x: wx, y: wy });
-                                }
+                    for (const p of msg.points) {
+                        if (p.distance > 0.18 && p.distance < 6.0 && p.quality !== 0) {
+                            const angleRad = (p.angle * Math.PI) / 180 + pose.theta;
+                            const wx = pose.x + p.distance * Math.cos(angleRad);
+                            const wy = pose.y + p.distance * Math.sin(angleRad);
+                            
+                            const gx = Math.round(wx / GRID_RES);
+                            const gy = Math.round(wy / GRID_RES);
+                            const gridKey = gx + ',' + gy;
+                            if (!gridSet.has(gridKey)) {
+                                gridSet.add(gridKey);
+                                worldPoints.push({ x: wx, y: wy });
                             }
-                        }
-                        
-                        if (worldPoints.length > 0) {
-                            newAccumulatedMap = [...newAccumulatedMap, ...worldPoints];
-                        }
-                        
-                        // Hard cap at 50000 unique grid cells
-                        if (newAccumulatedMap.length > 50000) {
-                            newAccumulatedMap = newAccumulatedMap.slice(newAccumulatedMap.length - 50000);
                         }
                     }
+                }
 
-                    return {
-                        robots: {
-                            ...state.robots,
-                            [robotId]: {
-                                ...robot,
-                                lidarData: msg.points || [],
-                                accumulatedMap: newAccumulatedMap
-                            }
-                        }
-                    };
-                });
+                // Buffer update for UI
+                const currentRobotState = get().robots[robotId];
+                const isManualActive = currentRobotState?.manualControlActive;
+
+                if (!isManualActive) {
+                    const currentData = telemBuffer.get(robotId) || {};
+                    telemBuffer.set(robotId, { ...currentData, lidarData: msg.points || [] });
+                }
+
+                if (worldPoints.length > 0 && !isManualActive) {
+                    const currentMapBuffered = lidarMapBuffer.get(robotId) || [];
+                    lidarMapBuffer.set(robotId, [...currentMapBuffered, ...worldPoints]);
+                }
+                
+                queueUpdate();
             }));
 
             // --- Connection Lifecycle ---
@@ -252,7 +304,9 @@ const useRobotStore = create((set, get) => {
                         [robotId]: {
                             ...stateStore.robots[robotId],
                             connected: isConnected,
-                            bridgeStatus: state
+                            bridgeStatus: state,
+                            // Bật cờ đo đạc lại tọa độ nếu xe bị rớt mạng
+                            ...(!isConnected ? { _needsRealign: true } : {})
                         }
                     }
                 }));
@@ -320,6 +374,7 @@ const useRobotStore = create((set, get) => {
                             useFleetStore.getState().updateRobot(robotId, {
                                 pose: fusedPose,
                                 velocity: fusedVelocity,
+                                battery: get().robots[robotId]?.battery || 0
                             });
                         }
 
@@ -370,7 +425,7 @@ const useRobotStore = create((set, get) => {
                             navigationStatus: navS,
                             currentPath: path || [],
                             targetPose: goal,
-                            isNavigating: [NAV_STATE.PLANNING, NAV_STATE.FOLLOWING].includes(navS)
+                            isNavigating: [NAV_STATE.PLANNING, NAV_STATE.FOLLOWING, NAV_STATE.NAVIGATING_THROUGH].includes(navS)
                         }
                     }
                 }));
@@ -450,8 +505,23 @@ const useRobotStore = create((set, get) => {
             if (bm) {
                 bm.cancel();
             } else {
-                // Fallback: direct stop if BM is missing
                 robotBridge.cmdVel(robotId, 0, 0);
+            }
+        },
+
+        pauseMission: (robotId) => {
+            const bm = behaviorManagers.get(robotId);
+            if (bm) {
+                bm.pause();
+                console.log(`[RobotStore] Mission PAUSED for ${robotId}`);
+            }
+        },
+
+        resumeMission: (robotId) => {
+            const bm = behaviorManagers.get(robotId);
+            if (bm) {
+                bm.resume();
+                console.log(`[RobotStore] Mission RESUMED for ${robotId}`);
             }
         },
 

@@ -91,91 +91,158 @@ function App() {
     const lang = settings.language || 'en';
     const t = (key) => translations[lang][key] || key;
 
-    // Keyboard controls for selected robot
+    // Persistent keyboard state to avoid resets during robot telemetry updates
+    const keysPressed = useRef(new Set());
+    const currentLinear = useRef(0);
+    const currentAngular = useRef(0);
+    const velocityInterval = useRef(null);
+    const lastSentStop = useRef(false);
+
     useEffect(() => {
-        const keysPressed = new Set();
-        let velocityInterval = null;
+        const UPDATE_MS = 50; // 20Hz - Smoother control
+        const ACCEL_RATE = 1.0;  // Instant accel
+        const DECEL_RATE = 0.15; // Fast but visible decel for tapping
 
         const updateVelocity = () => {
+            const { robots, selectedRobotId, sendVelocity, stopRobot } = useFleetStore.getState();
             if (!selectedRobotId) return;
 
             const robot = robots.find(r => r.id === selectedRobotId);
             if (!robot?.connected) return;
 
-            let linear = 0;
-            let angular = 0;
+            const linearSpeed = robot.linearSpeed || 0.25;
+            const angularSpeed = robot.angularSpeed || 2.0;
 
-            // Use robot's max speeds as a base for keyboard control
-            const linearSpeed = robot.maxLinearSpeed || 0.3;
-            const angularSpeed = robot.maxAngularSpeed || 0.5;
+            let targetLinear = 0;
+            let targetAngular = 0;
 
-            if (keysPressed.has('KeyW') || keysPressed.has('ArrowUp')) linear += linearSpeed;
-            if (keysPressed.has('KeyS') || keysPressed.has('ArrowDown')) linear -= linearSpeed;
-            if (keysPressed.has('KeyA') || keysPressed.has('ArrowLeft')) angular += angularSpeed;
-            if (keysPressed.has('KeyD') || keysPressed.has('ArrowRight')) angular -= angularSpeed;
+            if (keysPressed.current.has('KeyW') || keysPressed.current.has('ArrowUp')) targetLinear += linearSpeed;
+            if (keysPressed.current.has('KeyS') || keysPressed.current.has('ArrowDown')) targetLinear -= linearSpeed;
+            if (keysPressed.current.has('KeyA') || keysPressed.current.has('ArrowLeft')) targetAngular += angularSpeed;
+            if (keysPressed.current.has('KeyD') || keysPressed.current.has('ArrowRight')) targetAngular -= angularSpeed;
 
-            if (linear !== 0 || angular !== 0) {
-                sendVelocity(selectedRobotId, linear, angular);
+            // Apply fast deceleration so tapping the key sends commands for a few cycles
+            if (targetLinear !== 0) {
+                currentLinear.current = targetLinear;
+            } else {
+                if (currentLinear.current > 0) currentLinear.current = Math.max(0, currentLinear.current - DECEL_RATE);
+                else if (currentLinear.current < 0) currentLinear.current = Math.min(0, currentLinear.current + DECEL_RATE);
+            }
+
+            if (targetAngular !== 0) {
+                currentAngular.current = targetAngular;
+            } else {
+                if (currentAngular.current > 0) currentAngular.current = Math.max(0, currentAngular.current - DECEL_RATE * 4);
+                else if (currentAngular.current < 0) currentAngular.current = Math.min(0, currentAngular.current + DECEL_RATE * 4);
+            }
+
+            // Zero out tiny values
+            if (Math.abs(currentLinear.current) < 0.01) currentLinear.current = 0;
+            if (Math.abs(currentAngular.current) < 0.05) currentAngular.current = 0;
+
+            if (currentLinear.current !== 0 || currentAngular.current !== 0 || targetLinear !== 0 || targetAngular !== 0) {
+                sendVelocity(selectedRobotId, currentLinear.current, currentAngular.current);
+                lastSentStop.current = false;
+            } else if (!lastSentStop.current) {
+                stopRobot(selectedRobotId);
+                lastSentStop.current = true;
+            }
+
+            // Auto-stop interval if no keys pressed and speeds are zero
+            if (currentLinear.current === 0 && currentAngular.current === 0) {
+                const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+                const hasMovement = movementKeys.some(key => keysPressed.current.has(key));
+                if (!hasMovement) {
+                    console.log('[KeyboardControl] Loop stopped (idle)');
+                    if (velocityInterval.current) {
+                        clearInterval(velocityInterval.current);
+                        velocityInterval.current = null;
+                    }
+                }
             }
         };
 
         const handleKeyDown = (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-            if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+            const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
+            if (movementKeys.includes(e.code)) {
                 e.preventDefault();
-                keysPressed.add(e.code);
+                
+                // Get current state to avoid stale closure issues
+                const { selectedRobotId } = useFleetStore.getState();
+                const { stopMission } = useRobotStore.getState();
 
-                if (!velocityInterval) {
-                    updateVelocity();
-                    velocityInterval = setInterval(updateVelocity, 100);
+                // ONLY trigger manual override once when starting a movement sequence
+                const isFirstKey = keysPressed.current.size === 0;
+                keysPressed.current.add(e.code);
+
+                if (isFirstKey && selectedRobotId) {
+                    console.log(`[Manual Control] Manual override START for robot ${selectedRobotId}`);
+                    // STOP any autonomous task (navigation, exploration, mission)
+                    if (stopMission) stopMission(selectedRobotId);
+
+                    import('./lib/autoExplorer').then(mod => {
+                        const autoExplorer = mod.default;
+                        autoExplorer.stop();
+                    });
+
+                    // Stop legacy AutoExplorer if active
+                    if (window.exploreActive && e.code !== 'Space') {
+                        console.log('[Manual Override] Stopping legacy AutoExplorer');
+                        if (window.exploreInterval) clearInterval(window.exploreInterval);
+                        window.exploreActive = false;
+                    }
+                }
+
+                if (!velocityInterval.current) {
+                    velocityInterval.current = setInterval(updateVelocity, UPDATE_MS);
                 }
             }
 
             if (e.code === 'Space') {
                 e.preventDefault();
+                currentLinear.current = 0;
+                currentAngular.current = 0;
+                const { selectedRobotId, stopRobot } = useFleetStore.getState();
                 if (selectedRobotId) stopRobot(selectedRobotId);
             }
 
-            // Cancel waypoint selection with Escape
             if (e.code === 'Escape' && isSelectingWaypoint) {
                 handleCancelWaypointSelect();
             }
         };
 
         const handleKeyUp = (e) => {
-            const wasMovementKey = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code);
-            keysPressed.delete(e.code);
-
-            // Check if any movement keys are still pressed
-            const hasMovementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
-                .some(key => keysPressed.has(key));
-
-            if (wasMovementKey && !hasMovementKeys) {
-                // Stop immediately when no movement keys are pressed
-                if (velocityInterval) {
-                    clearInterval(velocityInterval);
-                    velocityInterval = null;
-                }
-                // Send stop command immediately
-                if (selectedRobotId) {
-                    stopRobot(selectedRobotId);
-                }
-            } else if (wasMovementKey && hasMovementKeys) {
-                // Still have some keys pressed, update velocity
-                updateVelocity();
-            }
+            keysPressed.current.delete(e.code);
         };
 
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
 
+        // [BUGFIX] Ensure loop restarts if keys were already held during effect re-run
+        // This prevents the robot from stopping when dependencies like 'isSelectingWaypoint' change
+        const checkAndRestartLoop = () => {
+             const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+             const hasMovement = movementKeys.some(k => keysPressed.current.has(k));
+             if (hasMovement && !velocityInterval.current) {
+                 console.log('[KeyboardControl] Restarting loop after effect re-run');
+                 velocityInterval.current = setInterval(updateVelocity, UPDATE_MS);
+             }
+        };
+        checkAndRestartLoop();
+
         return () => {
+            console.log('[KeyboardControl] Cleaning up effect');
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
-            if (velocityInterval) clearInterval(velocityInterval);
+            if (velocityInterval.current) {
+                clearInterval(velocityInterval.current);
+                velocityInterval.current = null;
+            }
         };
-    }, [selectedRobotId, robots, sendVelocity, stopRobot, isSelectingWaypoint, handleCancelWaypointSelect]);
+    }, [isSelectingWaypoint, handleCancelWaypointSelect]);
+
 
     return (
         <Layout>

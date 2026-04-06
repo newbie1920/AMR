@@ -145,9 +145,6 @@ const WarehouseFloor = ({ size: propSize, showGrid = true, onFloorClick, isSelec
             {storeZones.map(zone => (
                 <Zone key={zone.id} zone={zone} />
             ))}
-
-            {/* Compass */}
-            <Compass size={width} />
         </group>
     );
 };
